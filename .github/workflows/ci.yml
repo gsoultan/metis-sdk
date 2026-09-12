@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # release.yml calls this before publishing, so a tag cannot ship code the
+  # suite has not agreed on.
+  workflow_call:
+
+# Least privilege: nothing here writes to the repository.
+permissions:
+  contents: read
+
+# A new push to the same ref makes the run in flight irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          # Build at whatever go.mod declares rather than a version pinned here,
+          # so the two cannot drift: a directive nobody builds against is a
+          # claim, not a constraint.
+          go-version-file: go.mod
+
+      # The central promise of this package: importing a client to call an
+      # HTTP API should not drag in the engine's dependency graph. That is the
+      # kind of thing that erodes by accident, one convenient helper at a time,
+      # so it is a build step rather than a line in the README.
+      - name: module has no dependencies
+        run: |
+          if grep -qE '^\s*require' go.mod; then
+            echo "::error::go.mod grew a require block; this module must stay stdlib-only"
+            cat go.mod; exit 1
+          fi
+          if [ -f go.sum ]; then
+            echo "::error::go.sum exists, so something is being depended on"
+            cat go.sum; exit 1
+          fi
+
+      - name: gofmt
+        run: gofmt -l . | tee /dev/stderr | (! read)
+
+      - name: vet
+        run: go vet ./...
+
+      # -race because the Worker runs handlers against a client whose token and
+      # organization are read under a mutex while Login may be writing them.
+      # That interleaving is the one behaviour a serial test cannot prove.
+      - name: test
+        run: go test -race -count=1 ./...
+
+      # A ratchet, not a target. It sits just under where the suite actually is
+      # so an honest refactor does not trip it, and above where a whole untested
+      # feature would put it. Measured on the client package alone: the only
+      # other package is examples/quickstart, whose main() needs a live server
+      # and would drag an honest number down for no signal.
+      - name: coverage floor
+        run: |
+          go test -count=1 -coverprofile=coverage.out .
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ {print substr($3, 1, length($3) - 1)}')"
+          echo "coverage: $total%"
+          if ! awk -v t="$total" 'BEGIN { exit (t + 0 >= 85) ? 0 : 1 }'; then
+            echo "::error::coverage is $total%, below the 85% floor"
+            exit 1
+          fi

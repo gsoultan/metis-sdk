@@ -1,0 +1,13 @@
+# Go
+*.test
+coverage.out
+# `go build ./examples/...` drops the compiled example here.
+/quickstart
+
+# Tooling artifacts. Local agent scratch, not part of the SDK.
+graphify-out/
+.serena/
+
+# Editors / OS
+.DS_Store
+.idea/
