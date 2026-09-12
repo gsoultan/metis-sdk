@@ -4,7 +4,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this
 project uses [semantic versioning](https://semver.org/spec/v2.0.0.html), and
 while the major version is 0 the API may still move.
 
-## [Unreleased]
+## [0.1.0] — 2026-09-13
+
+The first release published from this module path.
+
+The client existed before, inside the server repository at
+`github.com/gsoultan/metis/sdk`, but was never tagged there — it versioned with
+the engine. Everything under *Fixed* and *Changed* below is relative to that
+in-server version; **for a new user this is simply what the package does**, and
+the last section lists it in full.
+
+### Requires
+
+Any Metis server for the bulk of the surface. Three things need one newer than
+**v0.2.0**, because the endpoints behind them were added or corrected after that
+release: filtering tasks by instance, paging on the instance and by-assignee
+listings, and `Node.Type` on a task. See the server compatibility table in the
+README; the SDK refuses rather than guesses where the difference would otherwise
+be silent.
 
 ### Fixed
 
@@ -231,11 +248,10 @@ while the major version is 0 the API may still move.
   terms — CI here fails the build if `go.mod` grows a `require` block — and lets
   the client version independently of the engine it talks to.
 
-## [0.1.0] — extracted from the server repository
+### The client in full
 
-First release as a standalone module. Everything below shipped with the server.
-
-### Added
+Listed for anyone arriving without the history above. This is the surface as it
+shipped inside the server, and it is still here.
 
 - **A client with nothing in it but the client.** `Client` talks to one server
   as one authenticated principal, is safe for concurrent use, and depends on

@@ -390,7 +390,10 @@ type ListTasksOptions struct {
 // the server did not page.
 //
 // Set InstanceID to ask what one run is waiting on, rather than listing a
-// project and matching [UserTask.InstanceID] yourself.
+// project and matching [UserTask.InstanceID] yourself. That filter is newer
+// than Metis v0.2.0; against a server without it the request would quietly
+// widen to every task the caller can see, so the answer is checked and
+// [ErrFilterUnsupported] returned rather than handed back as if filtered.
 //
 // Each task carries its BPMN element as [UserTask.NodeID] and its element kind
 // as [UserTask.Type]. Node.Name is always empty — a task can be renamed, after
@@ -420,8 +423,58 @@ func (c *Client) ListTasks(ctx context.Context, opts ListTasksOptions) ([]UserTa
 		Page  *PageInfo  `json:"page"`
 		Tasks []UserTask `json:"tasks"`
 	}
-	err := c.do(ctx, http.MethodGet, path, nil, &out)
-	return out.Tasks, out.Page, err
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, nil, err
+	}
+	if err := verifyInstanceFilter(opts.InstanceID, out.Tasks); err != nil {
+		return nil, nil, err
+	}
+	return out.Tasks, out.Page, nil
+}
+
+// ErrFilterUnsupported means the server did not apply a filter the request
+// depended on, and answered something wider than was asked for.
+//
+// It is reported rather than silently tolerated because the wider answer is
+// indistinguishable from a correct one: a listing filtered to an instance and a
+// listing of the whole organization are the same shape. Acting on the second
+// believing it is the first is how work belonging to another run gets
+// completed.
+//
+// In practice it means the server predates the filter. Check for it when you
+// support older servers and want to fall back:
+//
+//	tasks, _, err := client.ListTasks(ctx, metis.ListTasksOptions{InstanceID: id})
+//	if errors.Is(err, metis.ErrFilterUnsupported) {
+//		// this server cannot narrow to an instance; ask for the project and
+//		// match InstanceID yourself, accepting that paging may hide some
+//	}
+var ErrFilterUnsupported = errors.New("metis: the server ignored a filter this request depended on")
+
+// verifyInstanceFilter checks the server actually narrowed to the instance
+// asked for.
+//
+// A server that does not read instance_id falls through to an unfiltered
+// listing and returns every task the caller can see, which looks exactly like a
+// filtered one. The proof it did not filter is a task from somewhere else, so
+// that is what this looks for.
+//
+// Tasks whose instance was not expanded carry no ID to check and are skipped; a
+// response made entirely of those cannot be verified either way, and is allowed
+// through rather than refused on suspicion.
+func verifyInstanceFilter(wanted string, tasks []UserTask) error {
+	if wanted == "" {
+		return nil
+	}
+	for i := range tasks {
+		got := tasks[i].InstanceID()
+		if got != "" && got != wanted {
+			return fmt.Errorf(
+				"%w: asked for tasks of instance %s and task %s of instance %s came back, so this server does not support instance_id (added after Metis v0.2.0)",
+				ErrFilterUnsupported, wanted, tasks[i].ID, got)
+		}
+	}
+	return nil
 }
 
 // ErrNoTasks is what [Client.LatestTask] returns when the project has no human

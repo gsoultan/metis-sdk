@@ -2,6 +2,7 @@ package metis
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -620,5 +621,109 @@ func TestHandOverCallsSurfaceForbidden(t *testing.T) {
 				t.Errorf("err = %v, want the 403", err)
 			}
 		})
+	}
+}
+
+// A server that does not read instance_id falls through to an unfiltered
+// listing and answers with every task the caller can see — the same shape as a
+// filtered one. Returning that as though it were filtered is how a caller
+// completes work belonging to another run, so it is refused.
+func TestListTasksRefusesAnUnfilteredAnswer(t *testing.T) {
+	f, client := newFakeServer(t)
+	// What Metis v0.2.0 and earlier answer: the whole organization.
+	f.respond("GET /api/v1/tasks", 200, `{"tasks":[
+		{"id":"task-2","status":"unclaimed","instance":{"id":"inst-1"}},
+		{"id":"task-9","status":"unclaimed","instance":{"id":"inst-OTHER"}}
+	]}`)
+
+	tasks, page, err := client.ListTasks(t.Context(), ListTasksOptions{InstanceID: "inst-1"})
+	if !errors.Is(err, ErrFilterUnsupported) {
+		t.Fatalf("err = %v, want ErrFilterUnsupported", err)
+	}
+	// No half-answer: a caller that ignores the error must not find a list to
+	// range over.
+	if tasks != nil || page != nil {
+		t.Error("tasks were returned alongside the error")
+	}
+	// The message has to name what was asked, what came back, and why — the
+	// reader is debugging a server they may not have known was too old.
+	for _, want := range []string{"inst-1", "inst-OTHER", "task-9", "v0.2.0"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not mention %q: %v", want, err)
+		}
+	}
+}
+
+// The guard must not fire on a correctly filtered answer, or it breaks the
+// feature it exists to protect.
+func TestListTasksAcceptsACorrectlyFilteredAnswer(t *testing.T) {
+	f, client := newFakeServer(t)
+	f.respond("GET /api/v1/tasks", 200, `{"tasks":[
+		{"id":"task-2","status":"unclaimed","instance":{"id":"inst-1"}},
+		{"id":"task-1","status":"completed","instance":{"id":"inst-1"}}
+	]}`)
+
+	tasks, _, err := client.ListTasks(t.Context(), ListTasksOptions{InstanceID: "inst-1"})
+	if err != nil {
+		t.Fatalf("a correctly filtered listing was refused: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("got %d tasks", len(tasks))
+	}
+}
+
+func TestInstanceFilterGuardEdgeCases(t *testing.T) {
+	t.Run("no filter asked for, nothing to verify", func(t *testing.T) {
+		// A project-wide listing legitimately spans instances.
+		f, client := newFakeServer(t)
+		f.respond("GET /api/v1/tasks", 200, `{"tasks":[
+			{"id":"task-1","instance":{"id":"inst-1"}},
+			{"id":"task-2","instance":{"id":"inst-2"}}
+		]}`)
+
+		if _, _, err := client.ListTasks(t.Context(), ListTasksOptions{ProjectID: "p-1"}); err != nil {
+			t.Fatalf("a project listing was refused: %v", err)
+		}
+	})
+
+	t.Run("an empty result is not proof of anything", func(t *testing.T) {
+		// An instance with no tasks is ordinary; it is also what an old server
+		// returns for an empty organization. Neither is an error.
+		f, client := newFakeServer(t)
+		f.respond("GET /api/v1/tasks", 200, `{"tasks":[]}`)
+
+		if _, _, err := client.ListTasks(t.Context(), ListTasksOptions{InstanceID: "inst-1"}); err != nil {
+			t.Fatalf("an empty listing was refused: %v", err)
+		}
+	})
+
+	t.Run("tasks with no instance expanded are skipped, not suspected", func(t *testing.T) {
+		// Nothing here proves the filter was ignored, so the answer stands.
+		f, client := newFakeServer(t)
+		f.respond("GET /api/v1/tasks", 200, `{"tasks":[{"id":"task-1","status":"unclaimed"}]}`)
+
+		tasks, _, err := client.ListTasks(t.Context(), ListTasksOptions{InstanceID: "inst-1"})
+		if err != nil {
+			t.Fatalf("an unverifiable listing was refused: %v", err)
+		}
+		if len(tasks) != 1 {
+			t.Errorf("got %d tasks", len(tasks))
+		}
+	})
+}
+
+// LatestTask reads through ListTasks, so it inherits the guard rather than
+// needing its own — and must not hand back a task from another run.
+func TestLatestTaskInheritsTheInstanceGuard(t *testing.T) {
+	f, client := newFakeServer(t)
+	f.respond("GET /api/v1/tasks", 200,
+		`{"tasks":[{"id":"task-9","status":"unclaimed","instance":{"id":"inst-OTHER"}}]}`)
+
+	task, err := client.LatestTask(t.Context(), ListTasksOptions{InstanceID: "inst-1"})
+	if !errors.Is(err, ErrFilterUnsupported) {
+		t.Fatalf("err = %v, want ErrFilterUnsupported", err)
+	}
+	if task != nil {
+		t.Error("a task from another instance was returned")
 	}
 }
