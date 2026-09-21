@@ -390,10 +390,11 @@ type ListTasksOptions struct {
 // the server did not page.
 //
 // Set InstanceID to ask what one run is waiting on, rather than listing a
-// project and matching [UserTask.InstanceID] yourself. That filter is newer
-// than Metis v0.2.0; against a server without it the request would quietly
-// widen to every task the caller can see, so the answer is checked and
-// [ErrFilterUnsupported] returned rather than handed back as if filtered.
+// project and matching [UserTask.InstanceID] yourself. That filter needs a
+// server running **Metis v0.3.0 or later**; against an older one the request
+// would quietly widen to every task the caller can see, so the answer is
+// checked and [ErrFilterUnsupported] returned rather than handed back as if it
+// had been filtered.
 //
 // Each task carries its BPMN element as [UserTask.NodeID] and its element kind
 // as [UserTask.Type]. Node.Name is always empty — a task can be renamed, after
@@ -470,7 +471,7 @@ func verifyInstanceFilter(wanted string, tasks []UserTask) error {
 		got := tasks[i].InstanceID()
 		if got != "" && got != wanted {
 			return fmt.Errorf(
-				"%w: asked for tasks of instance %s and task %s of instance %s came back, so this server does not support instance_id (added after Metis v0.2.0)",
+				"%w: asked for tasks of instance %s and task %s of instance %s came back, so this server does not support instance_id (it needs Metis v0.3.0 or later)",
 				ErrFilterUnsupported, wanted, tasks[i].ID, got)
 		}
 	}

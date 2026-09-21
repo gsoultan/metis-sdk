@@ -4,6 +4,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this
 project uses [semantic versioning](https://semver.org/spec/v2.0.0.html), and
 while the major version is 0 the API may still move.
 
+## [Unreleased]
+
+### Changed
+
+- **The server requirement is now a version rather than a hint.** v0.1.0 said
+  the instance filter, the instance and by-assignee paging, and `Node.Type`
+  needed a server "newer than v0.2.0" — true but unhelpful, because at the time
+  no release contained them and there was nothing to point at. They shipped in
+  **Metis v0.3.0**, so the README table, the `ListTasks` documentation and the
+  `ErrFilterUnsupported` message all name that version now.
+
+  No behaviour changed. The guard still refuses an unfiltered answer; it just
+  tells you which release fixes it.
+
 ## [0.1.0] — 2026-09-13
 
 The first release published from this module path.

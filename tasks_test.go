@@ -647,7 +647,7 @@ func TestListTasksRefusesAnUnfilteredAnswer(t *testing.T) {
 	}
 	// The message has to name what was asked, what came back, and why — the
 	// reader is debugging a server they may not have known was too old.
-	for _, want := range []string{"inst-1", "inst-OTHER", "task-9", "v0.2.0"} {
+	for _, want := range []string{"inst-1", "inst-OTHER", "task-9", "v0.3.0"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not mention %q: %v", want, err)
 		}

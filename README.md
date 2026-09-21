@@ -577,10 +577,10 @@ go run ./examples/quickstart
 
 ## Server compatibility
 
-The SDK talks to any Metis server; a few calls need one newer than **v0.2.0**,
-because the endpoints behind them were added or corrected after that release.
+The SDK talks to any Metis server; a few calls need **v0.3.0 or later**, because
+the endpoints behind them were added or corrected in that release.
 
-| Needs a server newer than v0.2.0 | Against v0.2.0 |
+| Needs Metis v0.3.0+ | Against v0.2.0 and earlier |
 | :-- | :-- |
 | `ListTasksOptions.InstanceID` | Refused with `ErrFilterUnsupported` — the server ignores the filter and answers with every task the caller can see, so the SDK checks and will not hand that back as if it were filtered. |
 | `ListInstances` / `ListTasksByAssignee` paging | `Page` and `PageSize` are ignored; you get the first page at the server's default. `PageInfo` still reports the true total. |
@@ -588,7 +588,7 @@ because the endpoints behind them were added or corrected after that release.
 
 Everything else — deploying, starting, messages and signals, the task lifecycle,
 external-task workers, definitions, incidents, execution paths — works against
-v0.2.0 unchanged.
+v0.2.0 and earlier unchanged.
 
 `LatestTask` and `LatestInstance` ask for a single row; an older server ignores
 that and fetches a default page, but still returns the right one.
