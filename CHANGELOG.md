@@ -4,7 +4,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this
 project uses [semantic versioning](https://semver.org/spec/v2.0.0.html), and
 while the major version is 0 the API may still move.
 
-## [Unreleased]
+## [0.1.1] — 2026-09-21
 
 ### Changed
 
@@ -17,6 +17,37 @@ while the major version is 0 the API may still move.
 
   No behaviour changed. The guard still refuses an unfiltered answer; it just
   tells you which release fixes it.
+
+### Verified
+
+- **Run against a live engine for the first time.** Everything until now was
+  checked against an in-process fake, which proves the client is self-consistent
+  and not that it agrees with a server. `examples/quickstart` now runs end to
+  end against a real Metis: deploy, start, a worker serving the external task,
+  a human task claimed and completed, the instance finishing, and a twelve-entry
+  timeline read back.
+
+  The rest of the surface was exercised the same way. Three results were worth
+  having: `ListUserTaskNodes` parses BPMN the server really exported rather than
+  a fixture; `Node.Type` arrives populated, confirming end to end that the
+  server carries it; and the `ErrFilterUnsupported` guard stays quiet against a
+  server that does filter, which is the failure a guard like that invites.
+
+### Added
+
+- **A release workflow.** v0.1.0 was tagged by hand. A tag now runs the suite at
+  the commit being released, refuses a version the changelog does not describe,
+  and — the part the working tree cannot tell you — fetches the published
+  version into a clean module through the proxy to check it resolves for
+  somebody who is not you.
+
+### Internal
+
+- **Numeric accessor coverage, 33% to complete.** `Variables.Float64` is a type
+  switch over six shapes a number can arrive in, and only two arms were
+  exercised; the others were reached through `Int` and `Int64` instead. Each
+  accessor is now tested against every shape, and against the fractions and
+  non-numbers each must refuse. Package coverage 93.6% to 95.9%.
 
 ## [0.1.0] — 2026-09-13
 

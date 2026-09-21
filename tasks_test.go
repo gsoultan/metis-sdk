@@ -217,9 +217,15 @@ func TestTaskAccessorsOnSparseResponses(t *testing.T) {
 	}
 
 	// And populated, for the path the worker actually takes.
-	withNode := ExternalTask{Node: &Node{ID: "charge"}}
+	withNode := ExternalTask{
+		Node:            &Node{ID: "charge"},
+		ProcessInstance: &Instance{ID: "inst-1"},
+	}
 	if got := withNode.NodeID(); got != "charge" {
 		t.Errorf("ExternalTask.NodeID = %q", got)
+	}
+	if got := withNode.InstanceID(); got != "inst-1" {
+		t.Errorf("ExternalTask.InstanceID = %q", got)
 	}
 }
 

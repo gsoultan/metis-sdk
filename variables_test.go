@@ -279,3 +279,160 @@ func TestNilVariablesAreSafeToRead(t *testing.T) {
 		t.Error("Merge onto nil lost the overlay")
 	}
 }
+
+// Every numeric shape a value can arrive in, through every numeric accessor.
+//
+// The accessors are the package's central safety claim — they never panic and
+// never invent a number — and each is a type switch whose arms are easy to add
+// and easy to leave untested. A table is the only way to be sure the arm for
+// int32 does what the arm for int64 does.
+func TestNumericAccessorsAcceptEveryShape(t *testing.T) {
+	// Each of these is 42 as some Go type, which is how it arrives depending on
+	// whether it crossed the wire, was decoded with UseNumber, or was built by
+	// the caller.
+	shapes := map[string]any{
+		"float64":     float64(42),
+		"float32":     float32(42),
+		"int":         int(42),
+		"int32":       int32(42),
+		"int64":       int64(42),
+		"json.Number": json.Number("42"),
+	}
+
+	for name, value := range shapes {
+		t.Run(name, func(t *testing.T) {
+			vars := Variables{"n": value}
+
+			if got, ok := vars.Float64("n"); !ok || got != 42 {
+				t.Errorf("Float64 = %v, %v; want 42, true", got, ok)
+			}
+			if got := vars.Float64Or("n", -1); got != 42 {
+				t.Errorf("Float64Or = %v; want 42", got)
+			}
+			if got, ok := vars.Int("n"); !ok || got != 42 {
+				t.Errorf("Int = %d, %v; want 42, true", got, ok)
+			}
+			if got := vars.IntOr("n", -1); got != 42 {
+				t.Errorf("IntOr = %d; want 42", got)
+			}
+			if got, ok := vars.Int64("n"); !ok || got != 42 {
+				t.Errorf("Int64 = %d, %v; want 42, true", got, ok)
+			}
+		})
+	}
+}
+
+// A fraction is readable as a float and refused as an integer, in whichever
+// shape it arrives — truncating 42.5 to 42 would hide a bug in whoever produced
+// it, and the refusal has to be consistent across the type switch's arms.
+func TestNumericAccessorsRefuseFractionsInEveryShape(t *testing.T) {
+	for name, value := range map[string]any{
+		"float64":     float64(42.5),
+		"float32":     float32(42.5),
+		"json.Number": json.Number("42.5"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			vars := Variables{"n": value}
+
+			if got, ok := vars.Float64("n"); !ok || got != 42.5 {
+				t.Errorf("Float64 = %v, %v; want 42.5, true", got, ok)
+			}
+			if got, ok := vars.Int("n"); ok {
+				t.Errorf("Int = %d, true; want a refusal", got)
+			}
+			if got, ok := vars.Int64("n"); ok {
+				t.Errorf("Int64 = %d, true; want a refusal", got)
+			}
+			if got := vars.IntOr("n", -1); got != -1 {
+				t.Errorf("IntOr = %d; want the fallback", got)
+			}
+		})
+	}
+}
+
+// json.Number carries text, so it is the one shape that can hold something
+// that is not a number at all.
+func TestJSONNumberThatIsNotANumber(t *testing.T) {
+	vars := Variables{"n": json.Number("not-a-number")}
+
+	if got, ok := vars.Float64("n"); ok {
+		t.Errorf("Float64 = %v, true; want a refusal", got)
+	}
+	if got, ok := vars.Int64("n"); ok {
+		t.Errorf("Int64 = %d, true; want a refusal", got)
+	}
+	if got := vars.Float64Or("n", 1.5); got != 1.5 {
+		t.Errorf("Float64Or = %v; want the fallback", got)
+	}
+
+	// An integer accessor must also refuse a json.Number holding a fraction,
+	// which Int64 reads through a different path than a float64 does.
+	fraction := Variables{"n": json.Number("2.5")}
+	if got, ok := fraction.Int64("n"); ok {
+		t.Errorf("Int64(json.Number 2.5) = %d, true; want a refusal", got)
+	}
+}
+
+// Non-numeric values reach the type switch's default arm on every accessor.
+func TestNumericAccessorsRefuseNonNumbers(t *testing.T) {
+	vars := Variables{
+		"string": "42",
+		"bool":   true,
+		"slice":  []any{42},
+		"map":    map[string]any{"n": 42},
+		"nil":    nil,
+	}
+
+	for key := range vars {
+		t.Run(key, func(t *testing.T) {
+			if got, ok := vars.Float64(key); ok {
+				t.Errorf("Float64 = %v, true; want a refusal", got)
+			}
+			if got, ok := vars.Int(key); ok {
+				t.Errorf("Int = %d, true; want a refusal", got)
+			}
+			if got, ok := vars.Int64(key); ok {
+				t.Errorf("Int64 = %d, true; want a refusal", got)
+			}
+		})
+	}
+}
+
+// Map accepts both the shape the wire produces and the shape a caller builds,
+// and Decode has to report a target it cannot fill rather than leaving a
+// half-populated struct.
+func TestMapAndDecodeEdges(t *testing.T) {
+	t.Run("a nested Variables, not just map[string]any", func(t *testing.T) {
+		vars := Variables{"customer": Variables{"name": "acme"}}
+		nested, ok := vars.Map("customer")
+		if !ok || nested.StringOr("name", "") != "acme" {
+			t.Errorf("Map = %+v, %v", nested, ok)
+		}
+	})
+
+	t.Run("Decode reports a mismatch", func(t *testing.T) {
+		vars := Variables{"amount": "not a number"}
+		var target struct {
+			Amount float64 `json:"amount"`
+		}
+		if err := vars.Decode(&target); err == nil {
+			t.Error("decoding a string into a float64 field was accepted")
+		}
+	})
+
+	t.Run("Decode refuses a non-pointer", func(t *testing.T) {
+		var target struct{}
+		if err := (Variables{"a": 1}).Decode(target); err == nil {
+			t.Error("decoding into a non-pointer was accepted")
+		}
+	})
+}
+
+// InstanceID on a task whose instance was expanded — the covered half was the
+// nil case.
+func TestUserTaskInstanceIDWhenExpanded(t *testing.T) {
+	task := UserTask{Instance: &Instance{ID: "inst-1"}}
+	if got := task.InstanceID(); got != "inst-1" {
+		t.Errorf("InstanceID = %q", got)
+	}
+}

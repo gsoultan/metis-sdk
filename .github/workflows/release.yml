@@ -1,0 +1,117 @@
+name: release
+
+# A tag is the release, entirely. The Go module proxy reads tags directly: no
+# version lives in a manifest that could drift from one, there is no registry to
+# push to and no credential to hold. `git push origin v0.1.1` publishes.
+#
+# What a tag alone does not do is run the suite at the commit being released,
+# check the module can actually be consumed at that version, or say what
+# changed. That is what this is for.
+#
+# The consumable job matters more than it looks. Everything else here builds the
+# module from the working tree, where a path that only resolves locally still
+# resolves. A consumer has none of that, and finding out from a bug report that
+# a published tag does not build is finding out too late.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  # Releasing a commit the suite has not agreed on is the failure this exists to
+  # prevent. Runs the whole of CI — including the no-dependencies check, which
+  # is the promise most worth not breaking in a release.
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  # The tag has to describe the code it points at. A tag whose version is not
+  # in the changelog is either an unreleased version or a forgotten entry, and
+  # both are better caught here than read by somebody later.
+  changelog:
+    name: the changelog names this version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: entry exists
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -qE "^## \[${version}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [${version}]' section for tag ${GITHUB_REF_NAME}"
+            grep -E '^## ' CHANGELOG.md | head -5
+            exit 1
+          fi
+          echo "found: $(grep -E "^## \[${version}\]" CHANGELOG.md)"
+
+  # The consumer's view: a fresh module, no working tree, no replace directive,
+  # fetching the tag through the proxy the way anybody else would.
+  consumable:
+    name: the tag resolves for a consumer
+    needs: [verify, changelog]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: a clean module can require this version
+        run: |
+          module="$(awk '/^module /{print $2}' go.mod)"
+          work="$(mktemp -d)"
+          cd "$work"
+          cat > go.mod <<EOF
+          module consumer
+          go $(awk '/^go /{print $2}' "$GITHUB_WORKSPACE/go.mod")
+          EOF
+          cat > main.go <<'EOF'
+          package main
+
+          import metis "github.com/gsoultan/metis-sdk"
+
+          func main() { _ = metis.NewClient("http://localhost:8080") }
+          EOF
+          # The proxy may not have the tag the instant it is pushed; a few
+          # retries is the difference between a real failure and a race.
+          for attempt in 1 2 3 4 5; do
+            if GOFLAGS=-mod=mod go get "${module}@${GITHUB_REF_NAME}"; then
+              go build ./... && echo "resolved and built at ${GITHUB_REF_NAME}"
+              exit 0
+            fi
+            echo "attempt ${attempt}: not on the proxy yet, waiting"
+            sleep 20
+          done
+          echo "::error::${module}@${GITHUB_REF_NAME} did not resolve for a clean consumer"
+          exit 1
+
+  publish:
+    name: publish the release
+    needs: consumable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The notes are the changelog's own section, so the release and the file
+      # cannot disagree.
+      - name: release notes from the changelog
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/       { exit }
+            found                   { print }
+          ' CHANGELOG.md > notes.md
+          echo "--- notes ---"; cat notes.md
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            --verify-tag
