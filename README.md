@@ -541,6 +541,15 @@ back fails, the SDK deliberately does not re-run your handler — the side effec
 already happened. The lock expires, the engine re-dispatches, and your handler
 sees the task a second time.
 
+The budget is per batch. The tasks of one fetch are locked together and run one
+after another, so the last of `MaxTasks` gets whatever the earlier ones left, and
+a task whose lock runs out before its turn is skipped and fetched again later.
+Size `LockDuration` for `MaxTasks` handlers in a row, or lower `MaxTasks`.
+
+On shutdown, a handler that finished still has its result reported, for up to
+ten seconds after the context is done. One that returned because it was
+cancelled is not reported as a failure, so a deploy never spends a retry.
+
 The lower-level calls are exported when you want to run the loop yourself:
 `FetchAndLock`, `CompleteExternalTask`, `FailExternalTask`.
 

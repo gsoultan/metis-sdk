@@ -1,12 +1,14 @@
 package metis
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -240,5 +242,34 @@ func TestEmbeddedErrorsAreNotSilent(t *testing.T) {
 	err := client.CompleteExternalTask(t.Context(), "et-1", "worker-1", nil)
 	if err == nil {
 		t.Fatal("an embedded error in a 200 body was swallowed — the worker would believe the task completed")
+	}
+}
+
+// A body past the read cap used to be cut off and handed to the JSON decoder,
+// which answered "unexpected end of JSON input" — an error that points at the
+// server rather than at the size of the page asked for.
+func TestOversizedResponseIsNamedAsSuch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"projects":[{"id":"`))
+		_, _ = w.Write(bytes.Repeat([]byte("x"), maxResponseBytes))
+		_, _ = w.Write([]byte(`"}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := NewClient(server.URL).ListProjects(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("err = %v, want it to say the response was too large", err)
+	}
+}
+
+func TestNilHTTPClientKeepsTheDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"projects":[]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	// Used to store the nil and panic on the first request.
+	if _, err := NewClient(server.URL, WithHTTPClient(nil)).ListProjects(t.Context()); err != nil {
+		t.Fatalf("ListProjects = %v", err)
 	}
 }

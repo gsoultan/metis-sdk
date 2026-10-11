@@ -367,3 +367,32 @@ func TestListUserTaskNodesPassesExportFailuresThrough(t *testing.T) {
 		t.Errorf("err = %v, want the underlying 404", err)
 	}
 }
+
+// The engine exports an ad-hoc sub-process as its own element, <adHocSubProcess>,
+// not as a <subProcess> with a flag. Reading only the latter lost every step
+// inside one — its user tasks included, so ListUserTaskNodes came back short.
+func TestParseNodesDescendsIntoAdHocSubProcesses(t *testing.T) {
+	nodes := ParseOrFail(t, `<definitions>
+	  <process id="p">
+	    <adHocSubProcess id="checks" name="Checks">
+	      <userTask id="kyc" name="Verify identity"/>
+	      <subProcess id="nested">
+	        <userTask id="deep" name="Nested approval"/>
+	      </subProcess>
+	    </adHocSubProcess>
+	  </process>
+	</definitions>`)
+
+	byID := make(map[string]Node, len(nodes))
+	for _, node := range nodes {
+		byID[node.ID] = node
+	}
+	if sub := byID["checks"]; sub.Type != NodeSubProcess || sub.Name != "Checks" {
+		t.Errorf("ad-hoc sub-process = %+v, want a sub-process named Checks", sub)
+	}
+	for _, id := range []string{"kyc", "deep"} {
+		if node, found := byID[id]; !found || node.Type != NodeUserTask {
+			t.Errorf("user task %q = %+v (found %v)", id, node, found)
+		}
+	}
+}

@@ -4,6 +4,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this
 project uses [semantic versioning](https://semver.org/spec/v2.0.0.html), and
 while the major version is 0 the API may still move.
 
+## [Unreleased]
+
+### Fixed
+
+- **A worker no longer runs a task after its lock has run out.** The tasks of
+  one fetch share one lock and run in turn, but each handler was given a fresh
+  `LockDuration`, so with the default five tasks the last could run up to five
+  minutes on a lock that expired after one, while the engine handed it to
+  another worker. A handler now gets what is left of the batch's lock, and a
+  task whose lock is already gone is skipped (reported through `OnError`) and
+  fetched again later.
+- **Stopping a worker no longer loses finished work.** The completion was sent
+  on the cancelled context and failed at once, so the work ran again wherever
+  the task went next. Report-backs now outlive shutdown by up to ten seconds.
+- **Stopping a worker no longer spends a retry.** A handler that returned
+  because it was cancelled was reported as a failure, which cost a retry and,
+  on the last one, raised an incident for a deploy. Such tasks are now left to
+  their lock, and the rest of the batch is not started.
+- **`ParseNodes` reads `<adHocSubProcess>`.** That is how the engine exports an
+  ad-hoc sub-process, and every step inside one, user tasks included, was
+  missing from `ListDefinitionNodes` and `ListUserTaskNodes`.
+- **A response over the 8 MiB read cap says so** instead of failing with
+  "unexpected end of JSON input".
+- **`WithHTTPClient(nil)` keeps the default client** instead of panicking on
+  the first request.
+
 ## [0.1.1] — 2026-09-21
 
 ### Changed

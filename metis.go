@@ -31,9 +31,17 @@ type Client struct {
 type Option func(*Client)
 
 // WithHTTPClient replaces the underlying HTTP client — for custom TLS,
-// proxies, or instrumentation.
+// proxies, or instrumentation. A nil client is ignored and the default kept.
+//
+// The replacement's own Timeout is what bounds each request from then on. One
+// left at zero waits on a wedged server for as long as the caller's context
+// allows, so give it one, or pass contexts with deadlines.
 func WithHTTPClient(h *http.Client) Option {
-	return func(c *Client) { c.http = h }
+	return func(c *Client) {
+		if h != nil {
+			c.http = h
+		}
+	}
 }
 
 // WithToken supplies a token obtained elsewhere, instead of calling Login.
@@ -41,6 +49,9 @@ func WithHTTPClient(h *http.Client) Option {
 func WithToken(token string) Option {
 	return func(c *Client) { c.token = token }
 }
+
+// maxResponseBytes caps how much of one response body is read.
+const maxResponseBytes = 8 << 20
 
 // defaultTimeout bounds every request. Without it a wedged server holds the
 // caller's goroutine forever, and integrations inherit the outage.
@@ -199,13 +210,20 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	defer resp.Body.Close()
 
 	// Bounded read: an error page should not become an unbounded allocation.
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	// One byte past the cap is read so an oversized body can be told apart
+	// from one that is exactly the cap.
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return fmt.Errorf("metis: read response: %w", err)
 	}
 
 	if resp.StatusCode >= 400 {
 		return &APIError{StatusCode: resp.StatusCode, Message: serverMessage(payload)}
+	}
+	if len(payload) > maxResponseBytes {
+		// A cut-off body decodes as "unexpected end of JSON input", which reads
+		// like a server bug. Say what happened, and what to do about it.
+		return fmt.Errorf("metis: %s %s: response is larger than %d MiB and was not read; ask for a smaller page", method, path, maxResponseBytes>>20)
 	}
 	if out == nil || len(payload) == 0 {
 		return nil

@@ -191,3 +191,114 @@ func TestWorkerKeepsPollingThroughTransportErrors(t *testing.T) {
 		t.Fatalf("OnError saw %d errors; the loop should keep trying and keep telling us", reported)
 	}
 }
+
+// TestWorkerGivesLaterTasksOnlyTheLockThatIsLeft is the batch case: the tasks
+// of one fetch share one lock, and run in turn. A later task's handler must not
+// be handed a fresh LockDuration, and a task whose lock has already run out
+// must not be started at all — another worker may be running it.
+func TestWorkerGivesLaterTasksOnlyTheLockThatIsLeft(t *testing.T) {
+	h, client := newWorkerHarness(t,
+		ExternalTask{ID: "slow", Topic: "charge", Retries: 3},
+		ExternalTask{ID: "late", Topic: "charge", Retries: 3},
+	)
+
+	const lock = 200 * time.Millisecond
+	var mu sync.Mutex
+	var started []string
+	var reported []error
+	worker := NewWorker(client, "charge", "w-1", WorkerOptions{LockDuration: lock, PollInterval: 20 * time.Millisecond},
+		func(ctx context.Context, task *ExternalTask) (Variables, error) {
+			mu.Lock()
+			started = append(started, task.ID)
+			mu.Unlock()
+			// Overruns the lock; the deadline is what stops it.
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+	worker.OnError = func(err error) {
+		mu.Lock()
+		reported = append(reported, err)
+		mu.Unlock()
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	finished := make(chan error, 1)
+	go func() { finished <- worker.Run(ctx) }()
+
+	select {
+	case <-h.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the overrunning handler was never stopped")
+	}
+	// Long enough for the second task to have been started, had it been.
+	time.Sleep(2 * lock)
+	cancel()
+	<-finished
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(started) != 1 || started[0] != "slow" {
+		t.Fatalf("handlers started for %v; the second task's lock had run out, so only %q should have run", started, "slow")
+	}
+	if len(reported) == 0 {
+		t.Fatal("the skipped task was not reported through OnError")
+	}
+}
+
+// TestWorkerReportsAfterShutdown is the deploy case: a handler that finishes as
+// the worker is told to stop has done its work, and the engine must hear so.
+// Reporting on the cancelled context failed every time, and the side effect ran
+// again wherever the task went next.
+func TestWorkerReportsAfterShutdown(t *testing.T) {
+	h, client := newWorkerHarness(t, ExternalTask{ID: "et-1", Topic: "charge", Retries: 3})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	worker := NewWorker(client, "charge", "w-1", WorkerOptions{PollInterval: 20 * time.Millisecond},
+		func(context.Context, *ExternalTask) (Variables, error) {
+			cancel() // the stop arrives while the work is finishing
+			return Variables{"charged": true}, nil
+		})
+
+	if err := worker.Run(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run = %v, want context.Canceled", err)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.completed) != 1 {
+		t.Fatalf("completed = %+v; finished work was lost because shutdown cancelled its report", h.completed)
+	}
+}
+
+// TestWorkerDoesNotSpendARetryOnShutdown: a handler that returns because the
+// worker is stopping has not failed. Reporting it would cost a retry, and on
+// the last one raise an incident, for a deploy.
+func TestWorkerDoesNotSpendARetryOnShutdown(t *testing.T) {
+	h, client := newWorkerHarness(t,
+		ExternalTask{ID: "et-1", Topic: "charge", Retries: 1},
+		ExternalTask{ID: "et-2", Topic: "charge", Retries: 1},
+	)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var calls int
+	worker := NewWorker(client, "charge", "w-1", WorkerOptions{PollInterval: 20 * time.Millisecond},
+		func(handlerCtx context.Context, _ *ExternalTask) (Variables, error) {
+			calls++
+			cancel()
+			<-handlerCtx.Done()
+			return nil, handlerCtx.Err()
+		})
+
+	if err := worker.Run(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run = %v, want context.Canceled", err)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.failed) != 0 {
+		t.Fatalf("failed = %+v; a shutdown was reported as the task failing", h.failed)
+	}
+	if calls != 1 {
+		t.Fatalf("handler ran %d times; the task after the stop should not have been started", calls)
+	}
+}

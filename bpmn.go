@@ -3,6 +3,7 @@ package metis
 import (
 	"encoding/xml"
 	"fmt"
+	"slices"
 )
 
 // maxSubProcessDepth bounds how far ParseNodes will descend into nested
@@ -49,6 +50,11 @@ type bpmnProcess struct {
 	BoundaryEvents          []bpmnFlowNode   `xml:"boundaryEvent"`
 	CallActivities          []bpmnFlowNode   `xml:"callActivity"`
 	SubProcesses            []bpmnSubProcess `xml:"subProcess"`
+	// AdHocSubProcesses is a separate BPMN element, not a flag on
+	// <subProcess>, and it is how the engine exports one. Without this field
+	// every step inside an ad-hoc sub-process — its user tasks included — was
+	// missing from the result.
+	AdHocSubProcesses []bpmnSubProcess `xml:"adHocSubProcess"`
 }
 
 // bpmnFlowNode is any element that is only a step: an id and a label.
@@ -183,7 +189,9 @@ func collectNodes(process bpmnProcess, depth int) ([]Node, error) {
 		nodes = append(nodes, Node{ID: endEvent.ID, Name: endEvent.Name, Type: endEvent.nodeType()})
 	}
 
-	for _, subProcess := range process.SubProcesses {
+	// The engine types an ad-hoc sub-process as a sub-process too; it differs in
+	// how its children are driven, not in what kind of step it is.
+	for _, subProcess := range slices.Concat(process.SubProcesses, process.AdHocSubProcesses) {
 		nodes = append(nodes, Node{ID: subProcess.ID, Name: subProcess.Name, Type: NodeSubProcess})
 		nested, err := collectNodes(subProcess.bpmnProcess, depth+1)
 		if err != nil {
