@@ -107,6 +107,12 @@ type WorkerOptions struct {
 	// a Handler gets: the handler context is cancelled when the lock would
 	// expire, because finishing work on a lock another worker may now hold
 	// means two workers charging the same card. Default 1 minute.
+	//
+	// The budget is per batch, not per task: the tasks of one fetch are locked
+	// together and run one after another, so the last of them has whatever the
+	// earlier ones left. A task whose lock runs out before its turn is not
+	// started; it is fetched again later. Size LockDuration for MaxTasks
+	// handlers in a row, or lower MaxTasks.
 	LockDuration time.Duration
 	// PollInterval is the pause between fetches that returned nothing.
 	// Default 2 seconds.
@@ -164,12 +170,24 @@ func NewWorker(client *Client, topic, workerID string, opts WorkerOptions, handl
 // never gives up on transient errors — it reports them via OnError and keeps
 // polling, because a worker that exits on the first network blip takes the
 // whole integration down with it.
+//
+// On shutdown a handler already running is cancelled, and Run waits for it to
+// return. If it finished its work, that is still reported to the engine, for up
+// to ten seconds after ctx is done, so a deploy does not throw finished work
+// away. If it returned an error because it was cancelled, nothing is reported:
+// the task is left to its lock and comes back with its retries intact. Tasks of
+// the batch not yet started are left the same way.
 func (w *Worker) Run(ctx context.Context) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
+		// Taken before the request, so it is never later than the moment the
+		// server started the locks: every lock in the batch runs out at or after
+		// lockDeadline. The local clock is used rather than the server's
+		// LockExpiration, because the two clocks need not agree.
+		fetchedAt := time.Now()
 		tasks, err := w.client.FetchAndLock(ctx, w.topic, w.workerID, w.opts.MaxTasks, w.opts.LockDuration)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -182,8 +200,15 @@ func (w *Worker) Run(ctx context.Context) error {
 			continue
 		}
 
+		lockDeadline := fetchedAt.Add(w.opts.LockDuration)
 		for i := range tasks {
-			w.runOne(ctx, &tasks[i])
+			if ctx.Err() != nil {
+				// Shutting down: the tasks not started are left to their locks,
+				// which expire and hand them to another worker. Starting one now
+				// would only run its handler on a cancelled context and fail it.
+				return ctx.Err()
+			}
+			w.runOne(ctx, &tasks[i], lockDeadline)
 		}
 
 		if len(tasks) == 0 {
@@ -194,27 +219,59 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
+// reportTimeout bounds one report-back made after Run's context was cancelled.
+const reportTimeout = 10 * time.Second
+
 // runOne executes the handler for one task and reports the outcome.
-func (w *Worker) runOne(ctx context.Context, task *ExternalTask) {
+//
+// lockDeadline is when the batch's locks run out. The tasks of a batch run one
+// after another, so a later task has less of its lock left than the first; the
+// handler gets what remains, not a fresh LockDuration, and a task whose lock has
+// already run out is not started at all.
+func (w *Worker) runOne(ctx context.Context, task *ExternalTask, lockDeadline time.Time) {
+	if !time.Now().Before(lockDeadline) {
+		// Another worker may already hold it. Running it here is the double
+		// execution the lock exists to prevent, and failing it would spend one
+		// of its retries on work nobody attempted.
+		w.report(fmt.Errorf("task %s was not started: its lock ran out while earlier tasks of the batch ran; it will be fetched again", task.ID))
+		return
+	}
+
 	// The handler's budget is the lock: past it, another worker may hold this
 	// task, and two workers completing the same work is the failure external
 	// tasks exist to prevent.
-	handlerCtx, cancel := context.WithTimeout(ctx, w.opts.LockDuration)
+	handlerCtx, cancel := context.WithDeadline(ctx, lockDeadline)
 	defer cancel()
 
 	variables, err := safelyHandle(handlerCtx, w.handler, task)
+
+	// The report-back must outlive shutdown. A handler that finished as Run's
+	// context was cancelled has done its work; reporting it on that context
+	// would fail at once, and the side effect would happen again on whichever
+	// worker the task is re-dispatched to.
+	reportCtx, cancelReport := context.WithTimeout(context.WithoutCancel(ctx), reportTimeout)
+	defer cancelReport()
+
 	if err != nil {
+		if ctx.Err() != nil {
+			// The handler stopped because the worker is shutting down, not
+			// because the work failed. Reporting it would spend a retry — the
+			// last one raises an incident — on a deploy. The lock expires and
+			// the task comes back untouched.
+			w.report(fmt.Errorf("task %s was interrupted by shutdown and left to its lock: %w", task.ID, err))
+			return
+		}
 		remaining := task.Retries - 1
 		if remaining < 0 {
 			remaining = 0
 		}
-		if failErr := w.client.FailExternalTask(ctx, task.ID, w.workerID, err.Error(), "", remaining, w.opts.RetryDelay); failErr != nil {
+		if failErr := w.client.FailExternalTask(reportCtx, task.ID, w.workerID, err.Error(), "", remaining, w.opts.RetryDelay); failErr != nil {
 			w.report(fmt.Errorf("task %s failed and the failure could not be reported: %w", task.ID, failErr))
 		}
 		return
 	}
 
-	if err := w.client.CompleteExternalTask(ctx, task.ID, w.workerID, variables); err != nil {
+	if err := w.client.CompleteExternalTask(reportCtx, task.ID, w.workerID, variables); err != nil {
 		// The work succeeded but the engine does not know. Do not retry the
 		// handler — the side effect happened. The lock expires, the engine
 		// re-dispatches, and the handler must be idempotent; the doc for
