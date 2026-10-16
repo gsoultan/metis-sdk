@@ -294,7 +294,15 @@ if instance.IsFinished() { ... }  // completed or failed — suspended is neithe
 `ProcessActive`, `ProcessCompleted`, `ProcessSuspended`, `ProcessFailed`.
 
 `GetTimeline` returns the plain-language audit trail; `entry.Text()` gives the
-line to show a person (the narrative, falling back to the message).
+line to show a person (the narrative, falling back to the message). A server
+from Metis v0.5.0 on sends at most 1,000 entries a read, so `GetTimeline` reads
+page after page until it has them all. For only the newest part of a long trail,
+read one page:
+
+```go
+page, err := client.GetTimelinePage(ctx, instanceID, metis.TimelinePageOptions{Limit: 20})
+// page.Entries: the twenty newest, oldest first. page.Total: how many in all.
+```
 
 ## When a run goes wrong
 
@@ -358,6 +366,9 @@ err = client.CompleteTask(ctx, taskID, metis.Variables{"ok": true})
 err = client.UnclaimTask(ctx, taskID)                                 // give it back
 err = client.AssignTask(ctx, taskID, "alice")                         // hand it over
 err = client.DelegateTask(ctx, taskID, "bob")                         // have them act on it
+err = client.ResolveTask(ctx, taskID)                                 // the delegate hands it back
+
+delegated, page, err := client.ListDelegatedTasks(ctx, metis.PageOptions{}) // still with somebody
 ```
 
 For one person's inbox there is a listing of its own:
@@ -380,6 +391,24 @@ person currently holding the task**, and answer 403 otherwise. An ordinary user
 can pass their own task on; reassigning one they never held is an admin
 operation. The two differ in intent rather than mechanics — assigning says the
 task is now theirs, delegating says they are acting on it for you.
+
+**Anybody but the holder says why.** From Metis v0.5.0, assigning, delegating,
+releasing or resolving a task you do not hold — with an administrator's token,
+typically — is refused with a 400 until it carries a reason, which the server
+keeps in the task's history:
+
+```go
+err = client.AssignTask(ctx, taskID, "bob", metis.WithReason("Alice is on leave"))
+```
+
+The same release refuses a username that is not an account in the
+organization, and answers 400 to assigning a task to the person already holding
+it.
+
+**Completing sets only what the form declares.** From Metis v0.5.0,
+`CompleteTask` may write only the variables the step's form has fields for; a
+completion carrying any other is refused with a 400 naming them, and nothing is
+written.
 
 `ListTasks` returns every status. Filter for an inbox:
 
@@ -546,12 +575,29 @@ after another, so the last of `MaxTasks` gets whatever the earlier ones left, an
 a task whose lock runs out before its turn is skipped and fetched again later.
 Size `LockDuration` for `MaxTasks` handlers in a row, or lower `MaxTasks`.
 
+**Work that can outlast its lock** can keep it instead. With `ExtendLock` set, the
+worker asks for another `LockDuration` each time half of what is left has passed,
+for as long as the handler runs, and cancels the handler's context only if the
+lock could not be kept — at once if the server says it is no longer this
+worker's, so a task is never finished by two workers.
+
+```go
+worker := metis.NewWorker(client, "render-report", workerID,
+	metis.WorkerOptions{LockDuration: time.Minute, MaxTasks: 1, ExtendLock: true}, handler)
+```
+
+A handler that hangs then holds its task for as long as the process lives, so put
+your own timeout on work that can. Only the task running is extended, which is
+why `MaxTasks: 1` goes with it. It needs Metis v0.5.0; against an older server
+the worker says so once through `OnError` and keeps to the lock it fetched.
+
 On shutdown, a handler that finished still has its result reported, for up to
 ten seconds after the context is done. One that returned because it was
 cancelled is not reported as a failure, so a deploy never spends a retry.
 
 The lower-level calls are exported when you want to run the loop yourself:
-`FetchAndLock`, `CompleteExternalTask`, `FailExternalTask`.
+`FetchAndLock`, `ExtendExternalTaskLock`, `CompleteExternalTask`,
+`FailExternalTask`.
 
 ## Errors
 
@@ -586,14 +632,26 @@ go run ./examples/quickstart
 
 ## Server compatibility
 
-The SDK talks to any Metis server; a few calls need **v0.3.0 or later**, because
-the endpoints behind them were added or corrected in that release.
+The SDK talks to any Metis server; a few calls need **v0.3.0 or later**, and a
+few more **v0.5.0 or later**, because the endpoints behind them were added or
+corrected in those releases.
 
 | Needs Metis v0.3.0+ | Against v0.2.0 and earlier |
 | :-- | :-- |
 | `ListTasksOptions.InstanceID` | Refused with `ErrFilterUnsupported` — the server ignores the filter and answers with every task the caller can see, so the SDK checks and will not hand that back as if it were filtered. |
 | `ListInstances` / `ListTasksByAssignee` paging | `Page` and `PageSize` are ignored; you get the first page at the server's default. `PageInfo` still reports the true total. |
 | `UserTask.Node.Type` | Empty. `UserTask.Type` carries the same kind and works against every server — read that instead. |
+
+| Needs Metis v0.5.0+ | Against v0.4.0 and earlier |
+| :-- | :-- |
+| `ResolveTask`, `ListDelegatedTasks` | No such route: an error, `IsNotFound` for `ResolveTask`. |
+| `ExtendExternalTaskLock`, `WorkerOptions.ExtendLock` | `ExtendExternalTaskLock` answers `IsNotFound`. A worker with `ExtendLock` says so once through `OnError` and keeps to the lock it fetched. |
+| `GetTimelinePage` paging | `Limit` and `Offset` are ignored and the whole trail comes back, with a `Total` of zero. `GetTimeline` works against both. |
+
+Going the other way, a v0.5.0 server asks two things of code written for an
+older one: a `WithReason` on a hand-over by anybody but the task's holder, and a
+form field for every variable `CompleteTask` sets. A reason sent to an older
+server is ignored.
 
 Everything else — deploying, starting, messages and signals, the task lifecycle,
 external-task workers, definitions, incidents, execution paths — works against

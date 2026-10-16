@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync/atomic"
 	"time"
 )
 
@@ -75,6 +76,34 @@ func (c *Client) FailExternalTask(ctx context.Context, taskID, workerID, message
 	return nil
 }
 
+// ExtendExternalTaskLock asks for more time on the lock workerID holds on a
+// task: the lock is moved to lockDuration from now, and the answer is when it
+// now runs out by the server's clock. lockDuration may be at most a day.
+//
+// Only the worker holding the lock can extend it, and only before it runs out.
+// Anything else is refused with a 400 ([IsInvalid]): the task may already be
+// with another worker, so stop working on it and let it be fetched again. It
+// needs **Metis v0.5.0 or later**; an older server has no such route and
+// answers 404 ([IsNotFound]).
+//
+// [Worker] does this for you when [WorkerOptions.ExtendLock] is set.
+func (c *Client) ExtendExternalTaskLock(ctx context.Context, taskID, workerID string, lockDuration time.Duration) (time.Time, error) {
+	if lockDuration <= 0 {
+		return time.Time{}, errors.New("metis: ExtendExternalTaskLock needs a positive lock duration")
+	}
+	var out struct {
+		LockExpiration time.Time `json:"lock_expiration"`
+	}
+	err := c.do(ctx, http.MethodPost, "/api/v1/external-tasks/"+url.PathEscape(taskID)+"/extend-lock", map[string]any{
+		"worker_id":        workerID,
+		"lock_duration_ms": lockDuration.Milliseconds(),
+	}, &out)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return out.LockExpiration, nil
+}
+
 // Handler does the actual work of one external task. Return the variables to
 // write back and the task completes; return an error and it is retried after
 // [WorkerOptions.RetryDelay] until its retries run out.
@@ -96,7 +125,9 @@ func (c *Client) FailExternalTask(ctx context.Context, taskID, workerID, message
 // expired, and a handler whose work succeeded but whose report-back failed sees
 // the same task again — see [Worker] for both windows. ctx is cancelled when
 // the lock would expire; respect it, because past that point another worker may
-// already hold this task.
+// already hold this task. With [WorkerOptions.ExtendLock] the lock is kept
+// alive while the handler runs, and ctx is cancelled only once it could not
+// be.
 type Handler func(ctx context.Context, task *ExternalTask) (Variables, error)
 
 // WorkerOptions tune a Worker. The zero value is usable.
@@ -120,6 +151,25 @@ type WorkerOptions struct {
 	// RetryDelay is how long a failed task waits before another attempt.
 	// Default 10 seconds.
 	RetryDelay time.Duration
+	// ExtendLock keeps a running handler's lock alive. When half of what is
+	// left of it has passed, the worker asks for another LockDuration, and
+	// keeps doing so until the handler returns, so work may outlast
+	// LockDuration without another worker being handed the task. The handler's
+	// context is then cancelled only when the lock could not be extended: at
+	// once if the server says the lock is no longer this worker's, or when it
+	// runs out if the server could not be reached in time.
+	//
+	// A handler that never returns now holds its task for as long as the
+	// process lives, where without this the lock would hand it on; put your
+	// own timeout on work that can hang.
+	//
+	// Only the task running is extended. The rest of its batch still run out
+	// LockDuration after the fetch, so with long work set MaxTasks to 1.
+	//
+	// It needs **Metis v0.5.0 or later**. Against an older server the first
+	// attempt is answered 404; that is reported once through OnError, and the
+	// worker carries on as if this were unset.
+	ExtendLock bool
 }
 
 func (o WorkerOptions) withDefaults() WorkerOptions {
@@ -146,6 +196,10 @@ type Worker struct {
 	workerID string
 	handler  Handler
 	opts     WorkerOptions
+
+	// cannotExtend is set once the server has said it has no extend-lock
+	// route, so the worker stops asking.
+	cannotExtend atomic.Bool
 
 	// OnError, if set, observes errors the loop absorbs — transport failures,
 	// report-back failures. The loop keeps going either way: a worker's job is
@@ -240,10 +294,28 @@ func (w *Worker) runOne(ctx context.Context, task *ExternalTask, lockDeadline ti
 	// The handler's budget is the lock: past it, another worker may hold this
 	// task, and two workers completing the same work is the failure external
 	// tasks exist to prevent.
-	handlerCtx, cancel := context.WithDeadline(ctx, lockDeadline)
-	defer cancel()
-
-	variables, err := safelyHandle(handlerCtx, w.handler, task)
+	var (
+		variables Variables
+		err       error
+		lost      bool
+	)
+	if w.opts.ExtendLock && !w.cannotExtend.Load() {
+		// The deadline moves as the lock is extended, so it is kept by
+		// keepLock rather than fixed on the context.
+		handlerCtx, cancel := context.WithCancel(ctx)
+		kept := make(chan struct{})
+		go func() {
+			defer close(kept)
+			lost = w.keepLock(handlerCtx, cancel, task.ID, lockDeadline)
+		}()
+		variables, err = safelyHandle(handlerCtx, w.handler, task)
+		cancel()
+		<-kept
+	} else {
+		handlerCtx, cancel := context.WithDeadline(ctx, lockDeadline)
+		variables, err = safelyHandle(handlerCtx, w.handler, task)
+		cancel()
+	}
 
 	// The report-back must outlive shutdown. A handler that finished as Run's
 	// context was cancelled has done its work; reporting it on that context
@@ -259,6 +331,11 @@ func (w *Worker) runOne(ctx context.Context, task *ExternalTask, lockDeadline ti
 			// last one raises an incident — on a deploy. The lock expires and
 			// the task comes back untouched.
 			w.report(fmt.Errorf("task %s was interrupted by shutdown and left to its lock: %w", task.ID, err))
+			return
+		}
+		if lost {
+			// The task is another worker's now. Failing it would be refused,
+			// or, worse, spend a retry of the attempt that holds it.
 			return
 		}
 		remaining := task.Retries - 1
@@ -277,6 +354,68 @@ func (w *Worker) runOne(ctx context.Context, task *ExternalTask, lockDeadline ti
 		// re-dispatches, and the handler must be idempotent; the doc for
 		// Handler says so because of exactly this window.
 		w.report(fmt.Errorf("task %s was done but completing it failed: %w", task.ID, err))
+	}
+}
+
+// minExtendWait is the shortest pause between two extensions of one lock, or a
+// tenth of LockDuration when that is shorter. It keeps a server that answers
+// slowly, or a lock nearly gone, from turning the extension into a busy loop:
+// with less than twice this left, the lock is left to run out.
+const minExtendWait = time.Second
+
+// keepLock extends the lock on taskID while ctx lives, and calls cancel when
+// the lock is lost: at once if the server says it is no longer ours, or when
+// lockDeadline passes if it could not be extended in time. It reports whether
+// the server said the lock was lost.
+//
+// lockDeadline is kept on the local clock, as Run keeps it: an extension asked
+// for at t runs out no earlier than t plus LockDuration, whatever the server's
+// clock says.
+func (w *Worker) keepLock(ctx context.Context, cancel context.CancelFunc, taskID string, lockDeadline time.Time) (lost bool) {
+	defer cancel()
+	floor := min(minExtendWait, w.opts.LockDuration/10)
+	extend := true
+	for {
+		remaining := time.Until(lockDeadline)
+		if remaining <= 0 {
+			return false
+		}
+		wait := remaining / 2
+		if !extend || wait < floor {
+			wait = remaining
+		}
+		if err := sleep(ctx, wait); err != nil {
+			return false
+		}
+		if !time.Now().Before(lockDeadline) {
+			return false
+		}
+
+		asked := time.Now()
+		reqCtx, cancelReq := context.WithDeadline(ctx, lockDeadline)
+		_, err := w.client.ExtendExternalTaskLock(reqCtx, taskID, w.workerID, w.opts.LockDuration)
+		cancelReq()
+		switch {
+		case err == nil:
+			lockDeadline = asked.Add(w.opts.LockDuration)
+		case ctx.Err() != nil:
+			return false
+		case IsNotFound(err):
+			// No such route: a server older than v0.5.0. Keep to the lock we
+			// have, and stop asking, for this task and every later one.
+			extend = false
+			if w.cannotExtend.CompareAndSwap(false, true) {
+				w.report(fmt.Errorf("the server cannot extend locks (it needs Metis v0.5.0 or later), so ExtendLock is off for this worker: %w", err))
+			}
+		case IsInvalid(err):
+			// The lock is not ours any more. Another worker may be running
+			// this task now; stop at once rather than finish it twice.
+			w.report(fmt.Errorf("task %s lost its lock and its handler was stopped: %w", taskID, err))
+			return true
+		default:
+			// Unreachable or failing for now. Try again while the lock lasts.
+			w.report(fmt.Errorf("task %s: extending its lock failed, will retry while it lasts: %w", taskID, err))
+		}
 	}
 }
 

@@ -6,6 +6,50 @@ while the major version is 0 the API may still move.
 
 ## [Unreleased]
 
+Brings the client up to **Metis v0.5.0**. Nothing that compiled against v0.1.x
+stops compiling, and everything still works against older servers; what a
+v0.5.0 server now asks of a caller is under **Changed**.
+
+### Added
+
+- **A reason on a hand-over.** `AssignTask`, `DelegateTask` and `UnclaimTask`
+  take `WithReason("…")`. From Metis v0.5.0 the server refuses a hand-over by
+  anybody but the task's holder — an administrator's token, typically — with a
+  400 until it carries one, and keeps it in the task's history. An older server
+  ignores it.
+- **`ResolveTask`** hands a delegated task back to whoever delegated it, and
+  **`ListDelegatedTasks`** lists the caller's delegations still with somebody.
+- **`ExtendExternalTaskLock`**, and **`WorkerOptions.ExtendLock`** to have a
+  worker use it. While a handler runs, the worker asks for another
+  `LockDuration` each time half of what is left has passed, so work may outlast
+  the lock it was fetched with without the task being handed to a second
+  worker. If the server says the lock is no longer this worker's, the handler is
+  stopped at once and the task is not failed, since it is somebody else's. Off
+  unless set: a handler that hangs would hold its task for as long as the
+  process lives. Against an older server the worker reports that once through
+  `OnError` and keeps to the lock it fetched.
+- **`GetTimelinePage`** reads one window of an audit trail, with `Total`
+  saying how many entries there are in all.
+- **`AuditEntry.ID`**.
+
+### Changed
+
+- **`GetTimeline` reads every page.** From Metis v0.5.0 one read of an audit
+  trail returns the newest 1,000 entries at most, so a longer trail came back
+  cut short with no error. `GetTimeline` now reads on until it holds the whole
+  trail, dropping the entries that pages written while it reads would repeat.
+  Against an older server it is one request, as before.
+- **`CompleteTask`'s documentation says what v0.5.0 allows**: only the
+  variables the step's form declares. Anything else is refused with a 400.
+
+### Fixed
+
+- **`AuditEntry.NodeID`, `NodeName` and `CreatedAt` are filled in.** The server
+  sends the step as a nested `node` and the time as `timestamp`, so all three
+  were always empty. Both spellings are read.
+
+## [0.1.2] — 2026-10-16
+
 ### Fixed
 
 - **A worker no longer runs a task after its lock has run out.** The tasks of
