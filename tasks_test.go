@@ -32,7 +32,7 @@ func TestClaimAndUnclaimActAsTheToken(t *testing.T) {
 		}
 	})
 
-	t.Run("unclaim needs only the path", func(t *testing.T) {
+	t.Run("unclaim needs only the path from its holder", func(t *testing.T) {
 		f, client := newFakeServer(t)
 		f.respond("POST /api/v1/tasks/task-1/unclaim", 200, `{}`)
 

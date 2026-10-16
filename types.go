@@ -1,6 +1,9 @@
 package metis
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // The types here are deliberately leaner than the server's: they carry the
 // fields an integrating application acts on, and unknown fields in responses
@@ -325,12 +328,49 @@ func (t ExternalTask) NodeID() string {
 // AuditEntry is one line of an instance's business timeline — what happened, in
 // order, in language meant for a person rather than a log parser.
 type AuditEntry struct {
+	// ID names the entry. Two reads of a trail that overlap carry the same
+	// entry under the same ID.
+	ID        string    `json:"id,omitempty"`
 	Type      string    `json:"type"`
 	NodeID    string    `json:"node_id,omitempty"`
 	NodeName  string    `json:"node_name,omitempty"`
 	Message   string    `json:"message"`
 	Narrative string    `json:"narrative,omitempty"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
+}
+
+// UnmarshalJSON reads an entry as the server writes it.
+//
+// The server sends the step as a nested node object and the time as
+// "timestamp", so NodeID, NodeName and CreatedAt, read under their own names
+// alone, always came back empty. Both spellings are accepted; the server's wins
+// where both are present.
+func (e *AuditEntry) UnmarshalJSON(data []byte) error {
+	type plain AuditEntry // no methods, so no recursion
+	var wire struct {
+		plain
+		Node *struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"node"`
+		Timestamp time.Time `json:"timestamp"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*e = AuditEntry(wire.plain)
+	if wire.Node != nil {
+		if wire.Node.ID != "" {
+			e.NodeID = wire.Node.ID
+		}
+		if wire.Node.Name != "" {
+			e.NodeName = wire.Node.Name
+		}
+	}
+	if !wire.Timestamp.IsZero() {
+		e.CreatedAt = wire.Timestamp
+	}
+	return nil
 }
 
 // Text returns the line to show a person: the narrative when the engine wrote

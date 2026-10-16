@@ -267,14 +267,119 @@ func (c *Client) LatestInstance(ctx context.Context, projectID string) (*Instanc
 	return &instances[0], nil
 }
 
-// GetTimeline returns an instance's audit trail — the plain-language record of
-// what happened, in order. Use [AuditEntry.Text] for the line to show a person.
+// GetTimeline returns an instance's whole audit trail — the plain-language
+// record of what happened, oldest first. Use [AuditEntry.Text] for the line to
+// show a person.
+//
+// From **Metis v0.5.0** the server answers one read with the newest 1,000
+// entries at most, and says how many there are in all. GetTimeline reads page
+// after page until it holds them all, so a long trail costs several requests;
+// use [Client.GetTimelinePage] to read only the newest part of one. Against an
+// older server, which sends the whole trail in one answer, it makes one
+// request, as it always did.
 func (c *Client) GetTimeline(ctx context.Context, instanceID string) ([]AuditEntry, error) {
+	page, err := c.GetTimelinePage(ctx, instanceID, TimelinePageOptions{})
+	if err != nil {
+		return nil, err
+	}
+	entries, total := page.Entries, page.Total
+	// No total is an older server, which sent everything; a total no larger
+	// than what came back is a trail that fitted in one page.
+	if total == 0 || len(entries) >= total {
+		return entries, nil
+	}
+
+	seen := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		if entry.ID != "" {
+			seen[entry.ID] = true
+		}
+	}
+	// Offsets count back from the newest entry, so entries written while this
+	// reads push older ones further back: a later page can repeat a few the
+	// last one held, and those are dropped by ID. Nothing is skipped, because
+	// the read goes on until a page comes back empty or the offset passes the
+	// newest total. The bound on rounds is for a server that keeps answering
+	// with nothing new, which would otherwise never end.
+	offset := len(entries)
+	for rounds := 0; offset < total; rounds++ {
+		if rounds > total {
+			return nil, fmt.Errorf("metis: the audit trail of %s did not come to an end after %d pages", instanceID, rounds)
+		}
+		older, err := c.GetTimelinePage(ctx, instanceID, TimelinePageOptions{Offset: offset})
+		if err != nil {
+			return nil, err
+		}
+		if len(older.Entries) == 0 {
+			break
+		}
+		offset += len(older.Entries)
+		if older.Total > total {
+			total = older.Total
+		}
+		fresh := make([]AuditEntry, 0, len(older.Entries))
+		for _, entry := range older.Entries {
+			if entry.ID != "" {
+				if seen[entry.ID] {
+					continue
+				}
+				seen[entry.ID] = true
+			}
+			fresh = append(fresh, entry)
+		}
+		entries = append(fresh, entries...)
+	}
+	return entries, nil
+}
+
+// TimelinePageOptions picks a window of an instance's audit trail, counted back
+// from the newest entry.
+type TimelinePageOptions struct {
+	// Limit is the most entries to return. Zero, or more than the server's
+	// page maximum (1,000), is the page maximum.
+	Limit int
+	// Offset is how many of the newest entries to skip first: the next page
+	// into the past is Offset plus the number of entries the last one held.
+	Offset int
+}
+
+// TimelinePage is one window of an instance's audit trail.
+type TimelinePage struct {
+	// Entries are oldest first, as the whole trail is.
+	Entries []AuditEntry
+	// Total is how many entries the trail holds, so a page can be told from
+	// the whole of it. Zero from a server older than Metis v0.5.0, which sends
+	// the whole trail and ignores Limit and Offset.
+	Total int
+}
+
+// GetTimelinePage returns one window of an instance's audit trail: the newest
+// entries, or older ones with [TimelinePageOptions.Offset]. Paging needs
+// **Metis v0.5.0 or later**; an older server ignores it and sends the whole
+// trail, with a Total of zero.
+//
+//	page, err := client.GetTimelinePage(ctx, id, metis.TimelinePageOptions{Limit: 20})
+//	// the twenty newest lines, oldest first; page.Total says how many in all
+func (c *Client) GetTimelinePage(ctx context.Context, instanceID string, opts TimelinePageOptions) (*TimelinePage, error) {
+	query := url.Values{}
+	if opts.Limit > 0 {
+		query.Set("limit", fmt.Sprint(opts.Limit))
+	}
+	if opts.Offset > 0 {
+		query.Set("offset", fmt.Sprint(opts.Offset))
+	}
+	path := "/api/v1/instances/" + url.PathEscape(instanceID) + "/audit"
+	if len(query) > 0 {
+		path += "?" + query.Encode()
+	}
 	var out struct {
 		Entries []AuditEntry `json:"entries"`
+		Total   int          `json:"total"`
 	}
-	err := c.do(ctx, http.MethodGet, "/api/v1/instances/"+url.PathEscape(instanceID)+"/audit", nil, &out)
-	return out.Entries, err
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &TimelinePage{Entries: out.Entries, Total: out.Total}, nil
 }
 
 // GetExecutionPath returns the route an instance took — the steps it reached,
@@ -533,13 +638,7 @@ func (c *Client) ListTasksByAssignee(ctx context.Context, assignee string, page 
 	if assignee == "" {
 		return nil, nil, errors.New("metis: ListTasksByAssignee needs a username — use ListTasks for an unfiltered listing")
 	}
-	query := url.Values{}
-	if page.Page > 0 {
-		query.Set("page", fmt.Sprint(page.Page))
-	}
-	if page.PageSize > 0 {
-		query.Set("page_size", fmt.Sprint(page.PageSize))
-	}
+	query := page.query()
 	path := "/api/v1/tasks/assignee/" + url.PathEscape(assignee)
 	if len(query) > 0 {
 		path += "?" + query.Encode()
@@ -580,8 +679,18 @@ func (c *Client) ClaimTask(ctx context.Context, taskID string) error {
 }
 
 // UnclaimTask returns a claimed task to the inbox for somebody else to take.
-func (c *Client) UnclaimTask(ctx context.Context, taskID string) error {
-	return c.do(ctx, http.MethodPost, "/api/v1/tasks/"+url.PathEscape(taskID)+"/unclaim", nil, nil)
+//
+// The person holding the task can release it as it is. Anybody else, an
+// administrator typically, must say why with [WithReason]: from **Metis
+// v0.5.0** the server refuses a release by anybody but the holder with a 400
+// until it carries one, and keeps the reason in the task's history.
+//
+//	err := client.UnclaimTask(ctx, taskID, metis.WithReason("Alice is on leave"))
+func (c *Client) UnclaimTask(ctx context.Context, taskID string, opts ...HandOverOption) error {
+	// An empty object rather than no body, as for ClaimTask: the server reads
+	// the reason from a JSON body here.
+	return c.do(ctx, http.MethodPost, "/api/v1/tasks/"+url.PathEscape(taskID)+"/unclaim",
+		handOverBody(nil, opts), nil)
 }
 
 // AssignTask hands a task to a named person and marks it claimed by them. This
@@ -595,13 +704,19 @@ func (c *Client) UnclaimTask(ctx context.Context, taskID string) error {
 // ordinary user can pass a task on, but cannot reach into the inbox and assign
 // one they never held. Reassigning an *unclaimed* task is therefore an
 // administrator's operation. Check with [IsUnauthorized].
-func (c *Client) AssignTask(ctx context.Context, taskID, username string) error {
+//
+// From **Metis v0.5.0**, anybody but the task's holder must say why with
+// [WithReason], or the server answers 400 ([IsInvalid]). The same release
+// refuses a username that is not an account in the organization, and answers
+// 400 to assigning a task to the person who already holds it.
+//
+//	err := client.AssignTask(ctx, taskID, "bob", metis.WithReason("Alice is on leave"))
+func (c *Client) AssignTask(ctx context.Context, taskID, username string, opts ...HandOverOption) error {
 	if username == "" {
 		return errors.New("metis: AssignTask needs a username — say who the task is for, or use UnclaimTask to return it to the inbox")
 	}
-	return c.do(ctx, http.MethodPost, "/api/v1/tasks/"+url.PathEscape(taskID)+"/assign", map[string]any{
-		"user_id": username,
-	}, nil)
+	return c.do(ctx, http.MethodPost, "/api/v1/tasks/"+url.PathEscape(taskID)+"/assign",
+		handOverBody(map[string]any{"user_id": username}, opts), nil)
 }
 
 // DelegateTask hands a task to somebody else to act on, leaving it theirs to
@@ -614,14 +729,82 @@ func (c *Client) AssignTask(ctx context.Context, taskID, username string) error 
 // Delegating and assigning differ in intent rather than mechanics: assigning
 // says the task is now theirs, delegating says they are acting on it for you.
 // Both are allowed only for an administrator or the person currently holding
-// the task, and answer 403 otherwise — check with [IsUnauthorized].
-func (c *Client) DelegateTask(ctx context.Context, taskID, username string) error {
+// the task, and answer 403 otherwise — check with [IsUnauthorized]. As with
+// AssignTask, from **Metis v0.5.0** anybody but the holder must say why with
+// [WithReason].
+//
+// The delegate hands the task back with [Client.ResolveTask]; the tasks you
+// delegated that are still with somebody are [Client.ListDelegatedTasks].
+func (c *Client) DelegateTask(ctx context.Context, taskID, username string, opts ...HandOverOption) error {
 	if username == "" {
 		return errors.New("metis: DelegateTask needs a username — say who is to act on the task")
 	}
-	return c.do(ctx, http.MethodPost, "/api/v1/tasks/"+url.PathEscape(taskID)+"/delegate", map[string]any{
-		"user_id": username,
-	}, nil)
+	return c.do(ctx, http.MethodPost, "/api/v1/tasks/"+url.PathEscape(taskID)+"/delegate",
+		handOverBody(map[string]any{"user_id": username}, opts), nil)
+}
+
+// ResolveTask hands a delegated task back to the person who delegated it,
+// after which it is theirs to finish again.
+//
+// The delegate holding it can resolve it as it is; anybody else must say why
+// with [WithReason]. It needs **Metis v0.5.0 or later**: an older server has
+// no such route and answers 404 ([IsNotFound]).
+func (c *Client) ResolveTask(ctx context.Context, taskID string, opts ...HandOverOption) error {
+	return c.do(ctx, http.MethodPost, "/api/v1/tasks/"+url.PathEscape(taskID)+"/resolve",
+		handOverBody(nil, opts), nil)
+}
+
+// ListDelegatedTasks returns the tasks the signed-in user delegated that are
+// still with their delegate, newest first. It names nobody: who is asking is
+// whoever the client's token says.
+//
+// It needs **Metis v0.5.0 or later**: an older server has no such route, and
+// reads "delegated" as a task ID, answering 404 or 400.
+func (c *Client) ListDelegatedTasks(ctx context.Context, page PageOptions) ([]UserTask, *PageInfo, error) {
+	path := "/api/v1/tasks/delegated"
+	if query := page.query(); len(query) > 0 {
+		path += "?" + query.Encode()
+	}
+	var out struct {
+		Page  *PageInfo  `json:"page"`
+		Tasks []UserTask `json:"tasks"`
+	}
+	err := c.do(ctx, http.MethodGet, path, nil, &out)
+	return out.Tasks, out.Page, err
+}
+
+// HandOverOption adds to a request that moves a task between people:
+// [Client.AssignTask], [Client.DelegateTask], [Client.UnclaimTask] and
+// [Client.ResolveTask].
+type HandOverOption func(*handOver)
+
+type handOver struct {
+	reason string
+}
+
+// WithReason says why a task is being handed over. The server keeps it in the
+// task's history, and from Metis v0.5.0 requires it from anybody but the
+// person holding the task. An empty reason is the same as none.
+func WithReason(reason string) HandOverOption {
+	return func(h *handOver) { h.reason = reason }
+}
+
+// handOverBody is a hand-over's JSON body: fields, plus the reason when one
+// was given. A server older than v0.5.0 ignores the reason field.
+func handOverBody(fields map[string]any, opts []HandOverOption) map[string]any {
+	var h handOver
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&h)
+		}
+	}
+	if fields == nil {
+		fields = map[string]any{}
+	}
+	if h.reason != "" {
+		fields["reason"] = h.reason
+	}
+	return fields
 }
 
 // CompleteTask finishes a task as the signed-in user, writing variables back
@@ -630,10 +813,29 @@ func (c *Client) DelegateTask(ctx context.Context, taskID, username string) erro
 // The variables are laid over the instance's existing ones; keys you do not
 // mention keep their values. Pass nil to complete without writing any.
 //
+// From **Metis v0.5.0** a task may set only the variables its form declares:
+// a completion that carries any other is refused with a 400 ([IsInvalid])
+// naming them, and nothing is written. Give the step's form a field for each
+// variable you set. (A server started with
+// METIS_ALLOW_UNDECLARED_TASK_VARIABLES=true keeps the older rule for a
+// migration window.)
+//
 // As with [Client.ClaimTask], the acting user is the client's token. Completing
 // a task somebody else holds is refused by the server.
 func (c *Client) CompleteTask(ctx context.Context, taskID string, variables Variables) error {
 	return c.do(ctx, http.MethodPost, "/api/v1/tasks/"+url.PathEscape(taskID)+"/complete", map[string]any{
 		"variables": variables,
 	}, nil)
+}
+
+// query is the paging part of a listing's query string.
+func (p PageOptions) query() url.Values {
+	query := url.Values{}
+	if p.Page > 0 {
+		query.Set("page", fmt.Sprint(p.Page))
+	}
+	if p.PageSize > 0 {
+		query.Set("page_size", fmt.Sprint(p.PageSize))
+	}
+	return query
 }
