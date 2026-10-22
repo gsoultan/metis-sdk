@@ -227,6 +227,24 @@ instance, err  := client.GetInstance(ctx, instanceID)
 entries, err   := client.GetTimeline(ctx, instanceID)
 ```
 
+Give an instance your own name for the case — an order number, a claim
+reference — and find it by that later, without keeping the ID:
+
+```go
+id, err := client.StartProcess(ctx, projectID, "refund", vars,
+	metis.WithBusinessKey("ORDER-4411"))
+
+instances, _, err := client.ListInstances(ctx, metis.ListInstancesOptions{
+	ProjectID: projectID, BusinessKey: "ORDER-4411",
+})
+```
+
+A key is optional, not unique, at most 255 characters, and not encrypted, so
+keep personal data out of it. A sub-process started by a call activity carries
+its caller's key. `WithVersion(n)` starts a deployed version other than the
+latest. `ListInstancesOptions` also filters by `Status`, `DefinitionID` and
+`NeedsAttention` (an open incident).
+
 ### Finding deployed processes
 
 ```go
@@ -595,9 +613,139 @@ On shutdown, a handler that finished still has its result reported, for up to
 ten seconds after the context is done. One that returned because it was
 cancelled is not reported as a failure, so a deploy never spends a retry.
 
+Every fetch says what the worker is — `metis-sdk/` and the SDK's version unless
+`WorkerOptions.Version` names your build — and the server lists who serves each
+topic. A topic with work waiting and no live worker is `Unserved`, which is
+otherwise indistinguishable from a quiet one:
+
+```go
+topics, err := client.ListExternalTaskWorkers(ctx)
+for _, topic := range topics.Topics {
+	if topic.Unserved {
+		log.Printf("%d tasks wait on %q and nothing fetches it", topic.Waiting, topic.Topic)
+	}
+}
+```
+
 The lower-level calls are exported when you want to run the loop yourself:
-`FetchAndLock`, `ExtendExternalTaskLock`, `CompleteExternalTask`,
-`FailExternalTask`.
+`FetchAndLock` (with `WithWorkerVersion`), `ExtendExternalTaskLock`,
+`CompleteExternalTask`, `FailExternalTask`.
+
+## Simulating a process
+
+A simulation runs a process on the real engine against a virtual clock, inside
+a transaction that is always rolled back: nothing is kept, nothing is sent, no
+service is called. The steps the outside world would answer are answered by the
+request, and the whole trace comes back.
+
+```go
+run, err := client.Simulate(ctx, projectID, metis.SimulationRequest{
+	DefinitionKey: "expense",                  // or BPMNXML / Definition: a draft
+	Variables:     metis.Variables{"amount": 4200},
+	Answers: []metis.SimulationAnswer{
+		{Node: "approve", Kind: metis.AnswerPerson, Actor: "marc", After: "PT2H",
+			Returns: metis.Variables{"approved": true}},
+	},
+})
+switch run.Outcome {
+case metis.SimulationOutcomeNeedsAnswer: // run.AwaitingNode is the step to answer next
+case metis.SimulationOutcomeIncident:    // run.Incidents says what the engine refused
+}
+```
+
+`ReplayInstanceID` runs a real instance's case — what it started with, who did
+each step and when, what its services answered — on another version, and
+`run.Replay` says where the two went apart. Nothing about the instance changes.
+
+**Saved cases** are kept with the process, with what each must end with.
+`RunSimulationCases` runs them all against a version, or against the `.bpmn`
+about to be deployed, which is the check a pipeline wants:
+
+```go
+results, err := client.RunSimulationCases(ctx, projectID, "expense",
+	metis.SimulationRequest{BPMNXML: bpmn})
+for _, r := range results {
+	if !r.Passed() {
+		log.Printf("%s: %s", r.Case.Name, strings.Join(r.Misses, " "))
+	}
+}
+```
+
+`ListSimulationCases`, `CreateSimulationCase`, `UpdateSimulationCase` and
+`DeleteSimulationCase` manage them; a process keeps at most 20. Simulating is a
+designer's.
+
+## Webhooks
+
+An **outgoing webhook** posts a project's events to your address, each signed
+with the webhook's own secret, until the receiver accepts it. Register one (an
+administrator's), and keep the secret, which is shown once:
+
+```go
+hook, err := client.CreateOutgoingWebhook(ctx, projectID, "Finance ledger",
+	"https://ledger.example.com/hooks/metis",
+	metis.EventProcessCompleted, metis.EventIncidentRaised)
+// hook.Secret
+```
+
+The receiving end verifies and parses a delivery in one call. Deliveries arrive
+at least once and in no particular order, so remember the IDs you have handled:
+
+```go
+func handle(w http.ResponseWriter, r *http.Request) {
+	delivery, err := metis.ReadWebhook(r, secret)
+	if err != nil {
+		http.Error(w, "not from Metis", http.StatusUnauthorized)
+		return
+	}
+	if alreadyHandled(delivery.DeliveryID) {
+		return
+	}
+	// delivery.Event, delivery.Instance.BusinessKey, delivery.Incident.ID …
+}
+```
+
+A delivery carries no process variables, and an `incident.raised` one names the
+incident without its text; ask the API for either. `SendOutgoingWebhookTest`
+posts a signed sample now and returns the request and the answer, and
+`ListOutgoingWebhookDeliveries`, `RetryOutgoingWebhookDelivery` and
+`StopOutgoingWebhookDelivery` read and act on the delivery log.
+
+For the other direction — a partner posting to one of Metis's **incoming**
+webhooks — `SignWebhook` computes the `X-Metis-Signature` the partner sends, and
+`SimulateWebhookDelivery` tries a body against the webhook and says what a real
+delivery would do, acting on nothing.
+
+## Operating many instances at once
+
+Retry or cancel every instance of a project that a filter matches. Ask without
+`Apply` first, which only counts:
+
+```go
+req := metis.BatchRequest{
+	Kind:   metis.BatchRetry, // an operator's; BatchCancel is an administrator's
+	Reason: "the payment provider is back",
+	Filter: metis.BatchFilter{NeedsAttention: true},
+}
+preview, err := client.StartBatchOperation(ctx, projectID, req) // preview.Matched
+req.Apply = true
+started, err := client.StartBatchOperation(ctx, projectID, req)
+
+op, err := client.GetBatchOperation(ctx, started.Operation.ID)
+failed, err := client.ListBatchOperationItems(ctx, op.ID,
+	metis.ListBatchItemsOptions{Status: metis.BatchItemFailed})
+```
+
+One operation takes up to 10,000 instances and is worked through in the
+background, each exactly as the single-instance retry or cancel; it can be
+stopped with `StopBatchOperation`. Fix the cause before a retry.
+
+For an administrator, `ListOperations` reads the organization's **audit log** —
+who cancelled, waived, migrated or handed over what, newest first — and the
+retention calls keep an instance from the retention sweep
+(`PlaceRetentionHold`, `ReleaseRetentionHold`, `ListRetentionHolds`) or give a
+process its own period (`SetRetentionPeriod`, `ListRetentionPeriods`,
+`RetentionPeriodHistory`).
 
 ## Errors
 
@@ -647,6 +795,14 @@ corrected in those releases.
 | `ResolveTask`, `ListDelegatedTasks` | No such route: an error, `IsNotFound` for `ResolveTask`. |
 | `ExtendExternalTaskLock`, `WorkerOptions.ExtendLock` | `ExtendExternalTaskLock` answers `IsNotFound`. A worker with `ExtendLock` says so once through `OnError` and keeps to the lock it fetched. |
 | `GetTimelinePage` paging | `Limit` and `Offset` are ignored and the whole trail comes back, with a `Total` of zero. `GetTimeline` works against both. |
+
+| Needs a release newer than Metis v0.5.0 | Against v0.5.0 and earlier |
+| :-- | :-- |
+| `WithBusinessKey` | Ignored: the instance starts without a key. |
+| `ListInstancesOptions.BusinessKey` | Refused with `ErrFilterUnsupported`, as for the instance filter above: the server lists every instance, and the SDK will not hand that back as the case's. |
+| `WorkerOptions.Version`, `WithWorkerVersion` | Ignored. |
+| Simulating a draft (`Definition`, `BPMNXML`) or a replay | Refused with a 400 (`IsInvalid`): a replay or a `.bpmn` draft with a message saying it is not supported yet, a `Definition` draft as an unreadable request. `Simulate` and `SimulateBatch` of a deployed version work on both. |
+| Saved simulation cases, outgoing webhooks, `SimulateWebhookDelivery`, batch operations, `ListExternalTaskWorkers`, `ListOperations`, retention holds and periods | No such route: `IsNotFound`. |
 
 Going the other way, a v0.5.0 server asks two things of code written for an
 older one: a `WithReason` on a hand-over by anybody but the task's holder, and a

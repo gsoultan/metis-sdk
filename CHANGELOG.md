@@ -6,6 +6,68 @@ while the major version is 0 the API may still move.
 
 ## [Unreleased]
 
+Brings the client up to what Metis has gained since v0.5.0. Everything here
+needs a server newer than **v0.5.0**; against v0.5.0 and earlier the new calls
+answer `IsNotFound`, and the README's compatibility table says what each of the
+rest does. Nothing that worked against an older server stops working.
+
+### Added
+
+- **Business keys.** `StartProcess` takes `WithBusinessKey("ORDER-4411")`, and
+  `ListInstancesOptions.BusinessKey` finds the instances started for one case.
+  `Instance.BusinessKey` carries it. A server that ignores the filter lists
+  every instance, so the answer is checked and `ErrFilterUnsupported` returned
+  instead, as for the task listing's instance filter.
+- **`WithVersion`** starts a deployed version other than the latest, and
+  `ListInstancesOptions` filters by `Status`, `DefinitionID` and
+  `NeedsAttention`, which the server has long read and the SDK never sent.
+- **Workers say what they are.** Every fetch carries `worker_version`:
+  `WorkerOptions.Version`, or `metis-sdk/` and the SDK's version read from the
+  build. `FetchAndLock` takes `WithWorkerVersion`. Control characters are
+  dropped and the version cut to 64 characters, since the server refuses the
+  whole fetch over either. **`ListExternalTaskWorkers`** lists each topic with
+  its workers, and marks a topic with work waiting and no live worker
+  `Unserved`.
+- **Simulation.** `Simulate` and `SimulateBatch` run a deployed version, a
+  draft (`Definition` or `BPMNXML`), or a replay of a real instance
+  (`ReplayInstanceID`, with `SimulationRun.Replay` saying where the two went
+  apart). Saved cases: `ListSimulationCases`, `CreateSimulationCase`,
+  `UpdateSimulationCase`, `DeleteSimulationCase`, and
+  **`RunSimulationCases`**, which runs every case of a process against a
+  version or a draft and checks each against what it expects, with the misses
+  in the designer's words (`SimulationExpectation.Check`).
+- **Outgoing webhooks.** `CreateOutgoingWebhook` (its secret is in that answer
+  only), `ListOutgoingWebhooks`, `SetOutgoingWebhookEnabled`,
+  `DeleteOutgoingWebhook`, `SendOutgoingWebhookTest`, and the delivery log:
+  `ListOutgoingWebhookDeliveries`, `RetryOutgoingWebhookDelivery`,
+  `StopOutgoingWebhookDelivery`. The events are constants, `incident.raised`
+  among them.
+- **Receiving a delivery.** `ReadWebhook` verifies a delivery's v2 signature
+  over the raw body, refuses one signed more than five minutes from the
+  receiver's clock, and parses it into a `Delivery` carrying its
+  `DeliveryID`. `VerifyWebhook` is the check alone. `SignWebhook` computes the
+  same signature for a partner posting to an incoming webhook; a test pins it
+  to a value the server's own signer produced.
+- **`SimulateWebhookDelivery`** tries a body against an incoming webhook and
+  says what a real delivery would do, acting on nothing.
+- **Batch retry and cancel.** `StartBatchOperation` counts the instances a
+  filter matches, or, with `Apply`, starts retrying or cancelling them;
+  `GetBatchOperation`, `ListBatchOperations`, `ListBatchOperationItems` and
+  `StopBatchOperation` follow it.
+- **The audit log**, `ListOperations`: who did what across the organization,
+  newest first, filtered and paged.
+- **Retention.** `GetRetentionHold`, `PlaceRetentionHold`,
+  `ReleaseRetentionHold`, `ListRetentionHolds`; and `SetRetentionPeriod`,
+  `ListRetentionPeriods`, `RetentionPeriodHistory` for a process's own period.
+
+### Changed
+
+- **`StartProcess` and `FetchAndLock` take options** (`...StartOption`,
+  `...FetchOption`). Every call compiles as before; only code that stores
+  either method in a variable of the old function type needs the new one.
+
+## [0.2.0] — 2026-10-16
+
 Brings the client up to **Metis v0.5.0**. Nothing that compiled against v0.1.x
 stops compiling, and everything still works against older servers; what a
 v0.5.0 server now asks of a caller is under **Changed**.
