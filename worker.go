@@ -6,32 +6,105 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"runtime/debug"
+	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 )
 
 // FetchAndLock claims up to maxTasks external tasks on a topic for workerID.
 // The tasks stay invisible to other workers for lockDuration; a worker that
 // crashes simply lets its locks expire and the tasks become fetchable again.
-func (c *Client) FetchAndLock(ctx context.Context, topic, workerID string, maxTasks int, lockDuration time.Duration) ([]ExternalTask, error) {
+//
+// [WithWorkerVersion] says what the worker is, which the server shows beside
+// it in [Client.ListExternalTaskWorkers]. [Worker] sends the SDK's version
+// unless told otherwise.
+func (c *Client) FetchAndLock(ctx context.Context, topic, workerID string, maxTasks int, lockDuration time.Duration, opts ...FetchOption) ([]ExternalTask, error) {
+	body := map[string]any{
+		"topic":            topic,
+		"worker_id":        workerID,
+		"max_tasks":        maxTasks,
+		"lock_duration_ms": lockDuration.Milliseconds(),
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(body)
+		}
+	}
 	var out struct {
 		Tasks []ExternalTask `json:"tasks"`
 		// This endpoint reports failures inline rather than by status code.
 		Error string `json:"error"`
 	}
-	err := c.do(ctx, http.MethodPost, "/api/v1/external-tasks/fetch-and-lock", map[string]any{
-		"topic":            topic,
-		"worker_id":        workerID,
-		"max_tasks":        maxTasks,
-		"lock_duration_ms": lockDuration.Milliseconds(),
-	}, &out)
-	if err != nil {
+	if err := c.do(ctx, http.MethodPost, "/api/v1/external-tasks/fetch-and-lock", body, &out); err != nil {
 		return nil, err
 	}
 	if out.Error != "" {
 		return nil, fmt.Errorf("metis: fetch-and-lock: %s", out.Error)
 	}
 	return out.Tasks, nil
+}
+
+// FetchOption adds to what [Client.FetchAndLock] sends.
+type FetchOption func(body map[string]any)
+
+// maxWorkerVersionLength is the longest version the server records, in
+// characters. A longer one is refused, and with it the whole fetch.
+const maxWorkerVersionLength = 64
+
+// WithWorkerVersion says what the fetching worker is — your build's version,
+// say — for whoever reads [Client.ListExternalTaskWorkers]. Control
+// characters are dropped and anything past 64 characters is cut off, since the
+// server refuses the fetch over either. An empty version sends nothing. A
+// server no newer than Metis v0.5.0 ignores it.
+func WithWorkerVersion(version string) FetchOption {
+	version = cleanWorkerVersion(version)
+	return func(body map[string]any) {
+		if version != "" {
+			body["worker_version"] = version
+		}
+	}
+}
+
+func cleanWorkerVersion(version string) string {
+	version = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, version)
+	if runes := []rune(version); len(runes) > maxWorkerVersionLength {
+		version = string(runes[:maxWorkerVersionLength])
+	}
+	return strings.TrimSpace(version)
+}
+
+// sdkVersion is what a [Worker] says it is when [WorkerOptions.Version] is
+// not set: this module and the version the program was built with, read from
+// the build rather than kept in a constant somebody has to remember to bump.
+func sdkVersion() string {
+	const module = "github.com/gsoultan/metis-sdk"
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "metis-sdk"
+	}
+	version := ""
+	if info.Main.Path == module {
+		version = info.Main.Version
+	}
+	for _, dep := range info.Deps {
+		if dep.Path == module {
+			version = dep.Version
+			if dep.Replace != nil {
+				version = dep.Replace.Version
+			}
+		}
+	}
+	if version == "" || version == "(devel)" {
+		return "metis-sdk"
+	}
+	return "metis-sdk/" + version
 }
 
 // CompleteExternalTask reports a task done, writes variables back into the
@@ -170,6 +243,11 @@ type WorkerOptions struct {
 	// attempt is answered 404; that is reported once through OnError, and the
 	// worker carries on as if this were unset.
 	ExtendLock bool
+	// Version is what this worker says it is on every fetch, shown beside it
+	// in [Client.ListExternalTaskWorkers] — your service's build, typically.
+	// Default "metis-sdk/" and the SDK's version, or plain "metis-sdk" when
+	// the build does not say. See [WithWorkerVersion] for what is sent.
+	Version string
 }
 
 func (o WorkerOptions) withDefaults() WorkerOptions {
@@ -184,6 +262,9 @@ func (o WorkerOptions) withDefaults() WorkerOptions {
 	}
 	if o.RetryDelay <= 0 {
 		o.RetryDelay = 10 * time.Second
+	}
+	if o.Version == "" {
+		o.Version = sdkVersion()
 	}
 	return o
 }
@@ -242,7 +323,8 @@ func (w *Worker) Run(ctx context.Context) error {
 		// lockDeadline. The local clock is used rather than the server's
 		// LockExpiration, because the two clocks need not agree.
 		fetchedAt := time.Now()
-		tasks, err := w.client.FetchAndLock(ctx, w.topic, w.workerID, w.opts.MaxTasks, w.opts.LockDuration)
+		tasks, err := w.client.FetchAndLock(ctx, w.topic, w.workerID, w.opts.MaxTasks, w.opts.LockDuration,
+			WithWorkerVersion(w.opts.Version))
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
