@@ -160,20 +160,63 @@ func (c *Client) ListUserTaskNodes(ctx context.Context, definitionID string) ([]
 //
 // definitionKey is the process ID from the diagram — [Definition.Key], not
 // [Definition.ID]. The latest deployed version of that key is used, so a
-// redeploy takes effect on the next start without changing this call.
-func (c *Client) StartProcess(ctx context.Context, projectID, definitionKey string, variables Variables) (string, error) {
-	var out struct {
-		InstanceID string `json:"instance_id"`
-	}
-	err := c.do(ctx, http.MethodPost, "/api/v1/process/start", map[string]any{
+// redeploy takes effect on the next start without changing this call;
+// [WithVersion] pins another.
+//
+// [WithBusinessKey] gives the instance your name for the case — an order
+// number, a claim reference — which [ListInstancesOptions.BusinessKey] then
+// finds it by:
+//
+//	id, err := client.StartProcess(ctx, projectID, "refund", vars,
+//		metis.WithBusinessKey("ORDER-4411"))
+//
+// A business key needs a server newer than **Metis v0.5.0**. An older one
+// ignores it and starts the instance without one.
+func (c *Client) StartProcess(ctx context.Context, projectID, definitionKey string, variables Variables, opts ...StartOption) (string, error) {
+	body := map[string]any{
 		"project_id":     projectID,
 		"definition_key": definitionKey,
 		"variables":      variables,
-	}, &out)
-	if err != nil {
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(body)
+		}
+	}
+	var out struct {
+		InstanceID string `json:"instance_id"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/api/v1/process/start", body, &out); err != nil {
 		return "", err
 	}
 	return out.InstanceID, nil
+}
+
+// StartOption adds to what [Client.StartProcess] sends.
+type StartOption func(body map[string]any)
+
+// WithBusinessKey names the case the instance is for: at most 255 characters,
+// with no control characters, or the server refuses the start with a 400
+// ([IsInvalid]) and starts nothing. It is not unique, and not encrypted, so
+// keep personal data out of it. A sub-process started by a call activity
+// carries its caller's key. An empty key is the same as none.
+func WithBusinessKey(key string) StartOption {
+	return func(body map[string]any) {
+		if key != "" {
+			body["business_key"] = key
+		}
+	}
+}
+
+// WithVersion starts a deployed version other than the latest, by its
+// [Definition.Version] — to exercise a new version before it is the one every
+// start gets, or to keep starting the old one for a while. Zero is the latest.
+func WithVersion(version int) StartOption {
+	return func(body map[string]any) {
+		if version > 0 {
+			body["version"] = version
+		}
+	}
 }
 
 // GetInstance returns one process instance, including its current variables
@@ -204,6 +247,19 @@ type ListInstancesOptions struct {
 	Page int
 	// PageSize is how many instances per page. Zero means the server's default.
 	PageSize int
+
+	// BusinessKey keeps the instances started for one case, matched exactly
+	// as [WithBusinessKey] gave it. It needs a server newer than **Metis
+	// v0.5.0**: an older one ignores it and lists every instance, so the
+	// answer is checked and [ErrFilterUnsupported] returned instead.
+	BusinessKey string
+	// Status keeps the instances in one state, such as [ProcessFailed].
+	Status ProcessStatus
+	// DefinitionID keeps the instances of one deployed version,
+	// [Definition.ID].
+	DefinitionID string
+	// NeedsAttention keeps the instances holding an unresolved incident.
+	NeedsAttention bool
 }
 
 // ListInstances returns a project's process instances, **most recent first**.
@@ -225,13 +281,48 @@ func (c *Client) ListInstances(ctx context.Context, opts ListInstancesOptions) (
 	if opts.PageSize > 0 {
 		query.Set("page_size", fmt.Sprint(opts.PageSize))
 	}
+	if opts.BusinessKey != "" {
+		query.Set("business_key", opts.BusinessKey)
+	}
+	if opts.Status != "" {
+		query.Set("status", string(opts.Status))
+	}
+	if opts.DefinitionID != "" {
+		query.Set("definition_id", opts.DefinitionID)
+	}
+	if opts.NeedsAttention {
+		query.Set("needs_attention", "true")
+	}
 
 	var out struct {
 		Instances []Instance `json:"instances"`
 		Page      *PageInfo  `json:"page"`
 	}
-	err := c.do(ctx, http.MethodGet, "/api/v1/instances?"+query.Encode(), nil, &out)
-	return out.Instances, out.Page, err
+	if err := c.do(ctx, http.MethodGet, "/api/v1/instances?"+query.Encode(), nil, &out); err != nil {
+		return nil, nil, err
+	}
+	if err := verifyBusinessKeyFilter(opts.BusinessKey, out.Instances); err != nil {
+		return nil, nil, err
+	}
+	return out.Instances, out.Page, nil
+}
+
+// verifyBusinessKeyFilter checks the server narrowed to the business key asked
+// for. A server that does not read business_key lists every instance, and the
+// proof is an instance carrying another key or none: an older server sends
+// none at all, so its first instance gives it away.
+func verifyBusinessKeyFilter(wanted string, instances []Instance) error {
+	if wanted == "" {
+		return nil
+	}
+	for i := range instances {
+		if got := instances[i].BusinessKey; got != wanted {
+			return fmt.Errorf(
+				"%w: asked for the instances of business key %q and instance %s, with key %q, came back, so this server does not support business_key (it needs a release newer than Metis v0.5.0)",
+				ErrFilterUnsupported, wanted, instances[i].ID, got)
+		}
+	}
+	return nil
 }
 
 // LatestInstance returns the project's most recently created process instance —

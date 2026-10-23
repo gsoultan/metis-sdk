@@ -177,7 +177,11 @@ type Instance struct {
 	Definition *Definition `json:"definition,omitempty"`
 	// Variables is the instance's data as of this response.
 	Variables Variables `json:"variables,omitempty"`
-	CreatedAt time.Time `json:"created_at,omitzero"`
+	// BusinessKey is the caller's name for the case, given with
+	// [WithBusinessKey]. Empty when it was started without one, and always
+	// from a server no newer than Metis v0.5.0.
+	BusinessKey string    `json:"business_key,omitempty"`
+	CreatedAt   time.Time `json:"created_at,omitzero"`
 }
 
 // IsFinished reports whether the instance has stopped for good.
