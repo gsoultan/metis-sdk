@@ -14,6 +14,9 @@ rest does. Nothing that worked against an older server stops working.
 Some additions reach routes the server has had for longer, and say so in
 their entries.
 
+Code written against v0.2.0 needs changes in one place: where a response
+named another object by ID, it now holds a typed reference. See **Changed**.
+
 ### Added
 
 - **Business keys.** `StartProcess` takes `WithBusinessKey("ORDER-4411")`, and
@@ -95,6 +98,29 @@ their entries.
 - **`StartProcess` and `FetchAndLock` take options** (`...StartOption`,
   `...FetchOption`). Every call compiles as before; only code that stores
   either method in a variable of the old function type needs the new one.
+- **References are objects, not ID strings (breaking).** Where one object
+  names another, the field is now a typed reference that holds the ID and
+  loads or acts on what it names: `InstanceRef` (`Get`, `Incidents`,
+  `Tasks`), `TaskRef`, `ProjectRef` (`Get`, `Process`), `ProcessRef`
+  (`Versions`, `Start`), `StepRef` (`In(flow)`), `IncidentRef` (`Resolve`),
+  `WebhookRef`, `DeliveryRef` (`Retry`, `Stop`), `ReleaseRef` (`Cancel`) and
+  `DecisionRef` (`Evaluate`). Each takes only its own kind, so an instance ID
+  cannot go where a task is meant, and none calls the server until asked.
+  On the wire a reference is still the bare ID. Renamed fields:
+  `Operation.ProjectID/InstanceID/NodeID/NodeName` → `Project`, `Instance`,
+  `Step`; `AuditEntry.NodeID/NodeName` → `Step`; `RetentionHold.ProjectID/
+  InstanceID` → `Project`, `Instance`; `RetentionPeriod` and `SimulationCase`
+  `ProjectID` + `ProcessKey` → `Process`; `BatchOperation.ProjectID` →
+  `Project`; `BatchItem.InstanceID` and `SimulationReplay.InstanceID` →
+  `Instance`; `OutgoingWebhook.ProjectID` and `Delivery.ProjectID` →
+  `Project`; `DeliveryInstance.ProcessKey` → `Process`; `WebhookTest.DeliveryID`
+  → `Delivery`; `WebhookDelivery.WebhookID` → `Webhook`; the anonymous
+  `WebhookSimulationResult.Waiting` and `Starts` rows are now
+  `WebhookWaiter` and `WebhookStart`. `Instance`, `UserTask` and `Incident`
+  gain `Ref()`, and `UserTask` and `Incident` gain `Step()`. `GetProject`
+  is new. Filters and arguments still take IDs.
+- **`ProjectRef` is no longer an alias of `Project`.** The deprecated alias
+  gave its name to the project reference above; use `Project` for a project.
 
 ## [0.2.0] — 2026-10-16
 

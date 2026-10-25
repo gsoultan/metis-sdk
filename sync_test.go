@@ -19,7 +19,7 @@ func TestEvaluateDecision(t *testing.T) {
 	if limit, _ := result.Values.Int("limit"); limit != 5000 {
 		t.Errorf("limit = %d", limit)
 	}
-	if !result.Matched() || result.MatchedRuleIDs[0] != "r-gold" || result.DecisionVersion != 4 {
+	if !result.Matched() || result.MatchedRuleIDs[0] != "r-gold" || result.Decision.Version != 4 || result.Decision.Project.ID != "p-1" || result.Decision.Key != "credit-limit" {
 		t.Errorf("result = %+v", result)
 	}
 	body := f.last().Body
@@ -76,8 +76,8 @@ func TestListInstancesPageCarriesTheCounts(t *testing.T) {
 	if page.StatusCounts[ProcessFailed] != 10 || page.StatusCounts[ProcessActive] != 30 {
 		t.Errorf("counts = %v", page.StatusCounts)
 	}
-	if page.NeedsAttention != 3 || len(page.NeedsAttentionIDs) != 1 {
-		t.Errorf("needs attention = %d %v", page.NeedsAttention, page.NeedsAttentionIDs)
+	if page.NeedsAttention != 3 || len(page.NeedsAttentionOnPage) != 1 || page.NeedsAttentionOnPage[0].ID != "i-2" {
+		t.Errorf("needs attention = %d %v", page.NeedsAttention, page.NeedsAttentionOnPage)
 	}
 	if q := f.last().Query; q.Get("status") != "active" || q.Get("page_size") != "2" {
 		t.Errorf("query = %v", q)
@@ -136,6 +136,9 @@ func TestListWaiting(t *testing.T) {
 	if len(waiting) != 1 || waiting[0].Instances != 7 || waiting[0].Steps[0].Waiting != 5 {
 		t.Errorf("waiting = %+v", waiting)
 	}
+	if waiting[0].Process != (ProjectRef{ID: "p-1"}).Process("order") || waiting[0].Steps[1].Step.ID != "ship" {
+		t.Errorf("refs = %+v", waiting[0])
+	}
 }
 
 func TestListDeadlines(t *testing.T) {
@@ -155,8 +158,12 @@ func TestListDeadlines(t *testing.T) {
 	if deadlines.WithDeadline != 2 || deadlines.WithoutDeadline != 9 || deadlines.Tasks[0].Status != TaskClaimed {
 		t.Errorf("deadlines = %+v", deadlines)
 	}
+	first := deadlines.Tasks[0]
+	if first.Process != (ProjectRef{ID: "p-1"}).Process("order") || first.Step != (StepRef{ID: "approve", Name: "Approve"}) {
+		t.Errorf("refs = %+v", first)
+	}
 	late := deadlines.Overdue(time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC))
-	if len(late) != 1 || late[0].ID != "t-1" {
+	if len(late) != 1 || late[0].Task.ID != "t-1" {
 		t.Errorf("overdue = %+v", late)
 	}
 }
@@ -202,7 +209,7 @@ func TestVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if versions[0].ScheduledReleaseID != "rel-1" || versions[0].ScheduledFor.IsZero() {
+	if versions[0].ScheduledRelease != (ReleaseRef{Project: ProjectRef{ID: "p-1"}, ID: "rel-1"}) || versions[0].ScheduledFor.IsZero() {
 		t.Errorf("scheduled = %+v", versions[0])
 	}
 	if versions[1].Draining() || !versions[2].Draining() {

@@ -250,7 +250,7 @@ func TestTryingAnIncomingWebhook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.WouldAct || !result.Signature.Valid || result.CorrelationKey != "PO-4182" || result.Waiting[0].InstanceID != "i-1" {
+	if !result.WouldAct || !result.Signature.Valid || result.CorrelationKey != "PO-4182" || result.Waiting[0].Instance.ID != "i-1" {
 		t.Errorf("result = %+v", result)
 	}
 	// The body goes as text: a signature is over those bytes, and decoding

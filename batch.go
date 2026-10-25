@@ -84,7 +84,7 @@ type BatchPreview struct {
 // the background.
 type BatchOperation struct {
 	ID          string      `json:"id"`
-	ProjectID   string      `json:"project_id"`
+	Project     ProjectRef  `json:"project_id"`
 	Kind        BatchKind   `json:"kind"`
 	Reason      string      `json:"reason"`
 	Filter      BatchFilter `json:"filter"`
@@ -108,8 +108,8 @@ func (o BatchOperation) IsFinished() bool { return o.Status != BatchRunning }
 
 // BatchItem is one instance of an operation and what came of it.
 type BatchItem struct {
-	InstanceID string          `json:"instance_id"`
-	Status     BatchItemStatus `json:"status"`
+	Instance InstanceRef     `json:"instance_id"`
+	Status   BatchItemStatus `json:"status"`
 	// Detail says why it failed or was skipped.
 	Detail    string     `json:"detail,omitempty"`
 	SettledAt *time.Time `json:"settled_at,omitempty"`

@@ -21,7 +21,7 @@ func TestAuditEntryReadsTheServersShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if entry.ID != "e-1" || entry.NodeID != "approve" || entry.NodeName != "Approve refund" {
+	if entry.ID != "e-1" || entry.Step.ID != "approve" || entry.Step.Name != "Approve refund" {
 		t.Errorf("entry = %+v", entry)
 	}
 	if !entry.CreatedAt.Equal(time.Date(2026, 10, 14, 9, 30, 0, 0, time.UTC)) {
@@ -33,7 +33,7 @@ func TestAuditEntryReadsTheServersShape(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"type":"x","node_id":"n","node_name":"N","created_at":"2026-10-14T09:30:00Z"}`), &flat); err != nil {
 		t.Fatalf("decode flat: %v", err)
 	}
-	if flat.NodeID != "n" || flat.NodeName != "N" || flat.CreatedAt.IsZero() {
+	if flat.Step.ID != "n" || flat.Step.Name != "N" || flat.CreatedAt.IsZero() {
 		t.Errorf("flat = %+v", flat)
 	}
 }

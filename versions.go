@@ -2,6 +2,7 @@ package metis
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -66,10 +67,26 @@ type VersionStatus struct {
 	RunningInstances int64 `json:"running_instances"`
 	TotalInstances   int64 `json:"total_instances"`
 	// ScheduledFor is when a cutover arranged for later makes this version
-	// live, and ScheduledReleaseID names that cutover for
-	// [Client.CancelScheduledVersion]. Both are zero when none is arranged.
-	ScheduledFor       time.Time `json:"scheduled_for,omitzero"`
-	ScheduledReleaseID string    `json:"scheduled_release_id,omitempty"`
+	// live, and ScheduledRelease names that cutover, to cancel it. Both are
+	// zero when none is arranged.
+	ScheduledFor     time.Time  `json:"scheduled_for,omitzero"`
+	ScheduledRelease ReleaseRef `json:"-"`
+}
+
+// UnmarshalJSON reads the cutover from scheduled_release_id; [Client.ListVersions]
+// gives it its project.
+func (v *VersionStatus) UnmarshalJSON(data []byte) error {
+	type plain VersionStatus
+	var wire struct {
+		plain
+		ScheduledReleaseID string `json:"scheduled_release_id"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*v = VersionStatus(wire.plain)
+	v.ScheduledRelease.ID = wire.ScheduledReleaseID
+	return nil
 }
 
 // Draining reports whether the version is no longer live but still has
@@ -88,6 +105,11 @@ func (c *Client) ListVersions(ctx context.Context, projectID, processKey string)
 	path := "/api/v1/definitions/versions?" + url.Values{"project_id": {projectID}, "key": {processKey}}.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return nil, err
+	}
+	for i := range out.Versions {
+		if !out.Versions[i].ScheduledRelease.IsZero() {
+			out.Versions[i].ScheduledRelease.Project = ProjectRef{ID: projectID}
+		}
 	}
 	return out.Versions, nil
 }
@@ -115,7 +137,7 @@ func (c *Client) ScheduleVersion(ctx context.Context, projectID, processKey stri
 }
 
 // CancelScheduledVersion drops a cutover that has not happened yet, named by
-// [VersionStatus.ScheduledReleaseID] — the cutover, not the version, since one
+// [VersionStatus.ScheduledRelease] — the cutover, not the version, since one
 // version can be scheduled more than once.
 func (c *Client) CancelScheduledVersion(ctx context.Context, projectID, releaseID string) error {
 	if projectID == "" || releaseID == "" {
