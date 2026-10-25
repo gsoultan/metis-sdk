@@ -747,6 +747,29 @@ retention calls keep an instance from the retention sweep
 process its own period (`SetRetentionPeriod`, `ListRetentionPeriods`,
 `RetentionPeriodHistory`).
 
+## Decisions, versions and where work stands
+
+A DMN table can answer a service directly, without a process around it:
+
+```go
+result, err := client.EvaluateDecision(ctx, projectID, "credit-limit", metis.Variables{"score": 712})
+limit, _ := result.Values.Int("limit") // result.MatchedRuleIDs says which lines decided
+```
+
+Deploying a new version does not make it the one that starts. `ListVersions`
+shows which is live and how much each still runs; `PromoteVersion` makes one
+live now, `ScheduleVersion` at a set time, and `CancelScheduledVersion` drops a
+cutover not yet reached.
+
+For a dashboard or a health check, `ListInstancesPage` returns a page with the
+project-wide counts by status and of instances needing attention, in one
+request. `ListWaiting` says on which steps running work sits, `ListDeadlines`
+lists open tasks by due date, overdue first, and `ListSubProcesses` follows a
+call activity to the child instance it started.
+
+`UpdateTask` moves a task's due date, priority or name, with a reason, and
+`ActivateAdHocTask` starts an optional step of an ad-hoc sub-process.
+
 ## Errors
 
 Non-2xx answers come back as `*metis.APIError`, carrying the status and the
@@ -790,6 +813,10 @@ corrected in those releases.
 | `ListInstances` / `ListTasksByAssignee` paging | `Page` and `PageSize` are ignored; you get the first page at the server's default. `PageInfo` still reports the true total. |
 | `UserTask.Node.Type` | Empty. `UserTask.Type` carries the same kind and works against every server — read that instead. |
 
+| Needs Metis v0.4.0+ | Against v0.3.0 and earlier |
+| :-- | :-- |
+| `ListWaiting`, `ListDeadlines` | No such route: `IsNotFound`. |
+
 | Needs Metis v0.5.0+ | Against v0.4.0 and earlier |
 | :-- | :-- |
 | `ResolveTask`, `ListDelegatedTasks` | No such route: an error, `IsNotFound` for `ResolveTask`. |
@@ -811,7 +838,9 @@ server is ignored.
 
 Everything else — deploying, starting, messages and signals, the task lifecycle,
 external-task workers, definitions, incidents, execution paths — works against
-v0.2.0 and earlier unchanged.
+v0.2.0 and earlier unchanged. So do `EvaluateDecision`, version promotion and
+scheduling, `ListSubProcesses`, `UpdateTask`, `ActivateAdHocTask` and the
+counts on `ListInstancesPage`, all of which v0.3.0 already serves.
 
 `LatestTask` and `LatestInstance` ask for a single row; an older server ignores
 that and fetches a default page, but still returns the right one.
