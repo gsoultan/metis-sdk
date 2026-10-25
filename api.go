@@ -271,8 +271,17 @@ type ListInstancesOptions struct {
 //		PageSize:  50,
 //	})
 func (c *Client) ListInstances(ctx context.Context, opts ListInstancesOptions) ([]Instance, *PageInfo, error) {
+	page, err := c.ListInstancesPage(ctx, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	return page.Instances, page.Page, nil
+}
+
+// query is the listing's query string, refused without a project.
+func (opts ListInstancesOptions) query() (url.Values, error) {
 	if opts.ProjectID == "" {
-		return nil, nil, errors.New("metis: ListInstances needs a project ID — the server refuses an empty one rather than listing the whole organization")
+		return nil, errors.New("metis: ListInstances needs a project ID — the server refuses an empty one rather than listing the whole organization")
 	}
 	query := url.Values{"project_id": {opts.ProjectID}}
 	if opts.Page > 0 {
@@ -293,18 +302,7 @@ func (c *Client) ListInstances(ctx context.Context, opts ListInstancesOptions) (
 	if opts.NeedsAttention {
 		query.Set("needs_attention", "true")
 	}
-
-	var out struct {
-		Instances []Instance `json:"instances"`
-		Page      *PageInfo  `json:"page"`
-	}
-	if err := c.do(ctx, http.MethodGet, "/api/v1/instances?"+query.Encode(), nil, &out); err != nil {
-		return nil, nil, err
-	}
-	if err := verifyBusinessKeyFilter(opts.BusinessKey, out.Instances); err != nil {
-		return nil, nil, err
-	}
-	return out.Instances, out.Page, nil
+	return query, nil
 }
 
 // verifyBusinessKeyFilter checks the server narrowed to the business key asked
