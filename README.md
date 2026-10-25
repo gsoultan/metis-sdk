@@ -493,6 +493,32 @@ tasks, page, err := client.ListTasks(ctx, metis.ListTasksOptions{InstanceID: ins
 `LatestTask` asks the server for a single row rather than a page it would throw
 away, so `Page` and `PageSize` in the options are ignored.
 
+### User tasks in the order a case reaches them
+
+`ListUserTasksInOrder` reads a deployed diagram into the chain a case
+travels, with each step linked to the ones after and before it:
+
+```go
+flows, err := client.ListUserTasksInOrder(ctx, definitionID)
+for _, step := range flows[0].Steps {
+	fmt.Println(step.Order, step.Name, step.Lane) // 1 Submit Requester
+	for _, next := range step.Next() {
+		if step.SendsBackTo(next) {
+			fmt.Println("   can send back to", next.Name)
+		} else {
+			fmt.Println("   then", next.Name)
+		}
+	}
+}
+```
+
+Gateways, events and system steps between two user tasks are passed over.
+Steps inside a sub-process come where it stands, with `SubProcess` and
+`Depth()` saying where. `Assignment` says who a step is for and
+`MultiInstance` how it repeats ("two of three managers approve").
+`flows[0].Step(task.NodeID)` finds where a running task sits in the chain.
+`ParseFlow` does the same for a diagram you hold, for any kinds of step.
+
 ### Listing a definition's user task nodes
 
 ```go

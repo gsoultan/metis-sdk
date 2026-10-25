@@ -75,6 +75,15 @@ their entries.
   child instances (v0.3.0). `ListWaiting` counts running work per step, and
   `ListDeadlines` lists open tasks with a due date, overdue first, with
   `Deadlines.Overdue` (v0.4.0).
+- **User tasks in flow order.** `ListUserTasksInOrder` and `ParseFlow` read
+  a diagram into a `Flow` per process whose `Steps` are in the order work
+  reaches them — Submit, Checker, Approval — each linked to the steps
+  that come `Next()` and `Previous()`, gateways and system steps passed
+  over, a send-back told apart by `SendsBackTo`. A step carries its lane,
+  the `SubProcess` holding it, its documentation, who it is for
+  (`Assignment`: assignee, candidate users and groups, form) and how it
+  repeats (`MultiInstance`). Works against every server: it reads the
+  exported diagram.
 - **Case work.** `UpdateTask` renames a task, sets its priority, and moves or
   removes its due date, with a reason; `ActivateAdHocTask` starts an optional
   step of an ad-hoc sub-process. Served since Metis v0.3.0.
