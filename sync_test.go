@@ -314,3 +314,25 @@ func TestActivateAdHocTask(t *testing.T) {
 		t.Error("a step with no node ID was started")
 	}
 }
+
+func TestListClaimableTasks(t *testing.T) {
+	f, client := newFakeServer(t)
+	f.respond("POST /api/v1/tasks/candidates", 200, `{
+		"tasks": [{"id": "t-1", "name": "Check", "status": "unclaimed"}],
+		"page": {"total": 7, "page": 2, "page_size": 1, "has_more": true}}`)
+
+	tasks, page, err := client.ListClaimableTasks(t.Context(), PageOptions{Page: 2, PageSize: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].Status != TaskUnclaimed || page == nil || page.Total != 7 {
+		t.Errorf("tasks = %+v, page = %+v", tasks, page)
+	}
+	body := f.last().Body
+	if body["page"] != float64(2) || body["page_size"] != float64(1) {
+		t.Errorf("body = %v", body)
+	}
+	if _, named := body["user_id"]; named {
+		t.Error("a user was named; the server takes it from the token")
+	}
+}

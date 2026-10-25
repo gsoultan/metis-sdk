@@ -862,6 +862,29 @@ func (c *Client) ListDelegatedTasks(ctx context.Context, page PageOptions) ([]Us
 	return out.Tasks, out.Page, err
 }
 
+// ListClaimableTasks returns the unclaimed tasks the signed-in user may claim:
+// those naming them among the candidate users, those offered to a group they
+// belong to, and, for an administrator or an operator, those naming nobody.
+// It is the pool a person picks work from before [Client.ClaimTask].
+//
+// It is always the caller's own: the server takes the user from the token and
+// the groups from the memberships it holds, so there is nothing to name.
+func (c *Client) ListClaimableTasks(ctx context.Context, page PageOptions) ([]UserTask, *PageInfo, error) {
+	body := map[string]any{}
+	if page.Page > 0 {
+		body["page"] = page.Page
+	}
+	if page.PageSize > 0 {
+		body["page_size"] = page.PageSize
+	}
+	var out struct {
+		Page  *PageInfo  `json:"page"`
+		Tasks []UserTask `json:"tasks"`
+	}
+	err := c.do(ctx, http.MethodPost, "/api/v1/tasks/candidates", body, &out)
+	return out.Tasks, out.Page, err
+}
+
 // HandOverOption adds to a request that moves a task between people:
 // [Client.AssignTask], [Client.DelegateTask], [Client.UnclaimTask] and
 // [Client.ResolveTask].

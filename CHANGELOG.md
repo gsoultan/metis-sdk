@@ -84,6 +84,8 @@ their entries.
   (`Assignment`: assignee, candidate users and groups, form) and how it
   repeats (`MultiInstance`). Works against every server: it reads the
   exported diagram.
+- **`ListClaimableTasks`**: the unclaimed tasks the signed-in user may
+  claim, through their own name or their groups. Served since Metis v0.2.0.
 - **Case work.** `UpdateTask` renames a task, sets its priority, and moves or
   removes its due date, with a reason; `ActivateAdHocTask` starts an optional
   step of an ad-hoc sub-process. Served since Metis v0.3.0.
