@@ -89,6 +89,20 @@ named another object by ID, it now holds a typed reference. See **Changed**.
   exported diagram.
 - **`ListClaimableTasks`**: the unclaimed tasks the signed-in user may
   claim, through their own name or their groups. Served since Metis v0.2.0.
+- **Waiting for an outcome.** `WaitForInstance(id, WaitOptions{Until, Poll})`
+  and `StartAndWait`, with `ErrInstanceFailed` and `*WaitError` carrying the
+  instance as last read. `Instance.Tokens` and `Instance.WaitingAt(step)` say
+  where an instance stands.
+- **`SendMessageTo`** sends a message only once the instance is waiting at the
+  step that catches it, and otherwise fails with `ErrNoReceiver` instead of
+  having the server drop it.
+- **Doing a thing once.** `StartProcessOnce` finds the case's instance by
+  business key and process before starting one, and looks again after a lost
+  answer. `CompleteTaskSafely` and `ClaimAndComplete` read the task before
+  and after, answer nil for a task the user already completed, and report
+  somebody else's with a `*TaskConflictError` matching `ErrTaskTakenByOther`
+  or `ErrTaskClosed`. `CurrentUser` says who is signed in, from `Login` or
+  `GET /api/v1/users/me` (v0.5.0).
 - **Whole listings.** `AllInstances`, `AllTasks`, `AllClaimableTasks`,
   `AllDefinitions`, `AllBatchOperationItems`, `AllOperations` and
   `AllOutgoingWebhookDeliveries` walk every page as an `iter.Seq2`, reading a

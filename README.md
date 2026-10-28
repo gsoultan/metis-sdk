@@ -820,6 +820,66 @@ meant. On the wire a reference is the bare ID, as the server sends it. Calls
 that take an object to act on still take its ID as a string; `ref.ID` is
 always there.
 
+## Waiting, and doing a thing once
+
+The calls in this section are built from the ones above, for the places where
+an integration otherwise writes the same loop every time.
+
+**Wait for an outcome.** `WaitForInstance` reads an instance until
+`WaitOptions.Until` holds (by default, until it finishes) and returns it then.
+`StartAndWait` starts a process and waits, for a short unattended process whose
+result is needed now. Bound both with the context. A failed instance ends the
+wait with `ErrInstanceFailed`; a context that ends first gives a `*WaitError`
+with the instance as last read.
+
+```go
+ctx, cancel := context.WithTimeout(ctx, time.Minute)
+defer cancel()
+done, err := client.StartAndWait(ctx, project, "credit-check", vars, metis.WaitOptions{})
+```
+
+**Send a message when somebody waits for it.** The server drops a message that
+nothing is waiting for, and `SendMessage` still answers success. A reply that
+arrives while the instance is still on the step before is lost that way.
+`SendMessageTo` reads the instance until one of its paths stands at the step
+that catches the message, then sends. If the instance finishes or the context
+ends first, nothing is sent and the error wraps `ErrNoReceiver`.
+
+```go
+err := client.SendMessageTo(ctx, project, "payment-received", orderID, vars,
+	metis.Receiver{Instance: id, WaitingAt: "WaitForPayment"})
+```
+
+`Instance.Tokens` and `Instance.WaitingAt(step)` say where an instance from
+`GetInstance` stands.
+
+**Start a case once.** `StartProcessOnce(project, key, businessKey, vars)`
+returns the instance of that process already started for the business key, a
+finished one included, or starts one. After a start whose answer was lost it
+looks again, so calling it twice for the same order makes one instance. It is
+look-then-start with nothing held in between, so give one case to one caller at
+a time.
+
+**Complete a task once.** `CompleteTaskSafely` reads the task before and after
+completing it. A task the signed-in user already completed answers nil without
+a second completion. One that somebody else holds or completed gives a
+`*TaskConflictError` matching `ErrTaskTakenByOther`, and a withdrawn one
+matches `ErrTaskClosed`. A failure that leaves the task open comes back as it
+was, and the call can be made again. `ClaimAndComplete` claims first when the
+task is not the user's yet, for working an item off a shared queue:
+
+```go
+switch err := client.ClaimAndComplete(ctx, task.ID, vars); {
+case errors.Is(err, metis.ErrTaskTakenByOther):
+	// somebody was quicker: take the next one
+case err != nil:
+	return err
+}
+```
+
+Both need to know who is signed in. `CurrentUser` says, from `Login` or from
+`GET /api/v1/users/me` once.
+
 ## Reading a whole listing
 
 Every paged listing has an `All…` form that walks every page as a
@@ -918,12 +978,14 @@ corrected in those releases.
 | Needs Metis v0.5.0+ | Against v0.4.0 and earlier |
 | :-- | :-- |
 | `ResolveTask`, `ListDelegatedTasks` | No such route: an error, `IsNotFound` for `ResolveTask`. |
+| `CurrentUser` with a token from `WithToken`, and so `CompleteTaskSafely` and `ClaimAndComplete` | No such route: `IsNotFound`. After `Login` the user is known without it, against any server. |
 | `ExtendExternalTaskLock`, `WorkerOptions.ExtendLock` | `ExtendExternalTaskLock` answers `IsNotFound`. A worker with `ExtendLock` says so once through `OnError` and keeps to the lock it fetched. |
 | `GetTimelinePage` paging | `Limit` and `Offset` are ignored and the whole trail comes back, with a `Total` of zero. `GetTimeline` works against both. |
 
 | Needs a release newer than Metis v0.5.0 | Against v0.5.0 and earlier |
 | :-- | :-- |
 | `WithBusinessKey` | Ignored: the instance starts without a key. |
+| `StartProcessOnce` | The server keeps no business key, so the case cannot be found again. Once the project has any instance the call is refused with `ErrFilterUnsupported`, from the listing it reads first; in an empty project it starts one without the key. |
 | `ListInstancesOptions.BusinessKey` | Refused with `ErrFilterUnsupported`, as for the instance filter above: the server lists every instance, and the SDK will not hand that back as the case's. |
 | `WorkerOptions.Version`, `WithWorkerVersion` | Ignored. |
 | Simulating a draft (`Definition`, `BPMNXML`) or a replay | Refused with a 400 (`IsInvalid`): a replay or a `.bpmn` draft with a message saying it is not supported yet, a `Definition` draft as an unreadable request. `Simulate` and `SimulateBatch` of a deployed version work on both. |

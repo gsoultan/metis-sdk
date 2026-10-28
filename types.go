@@ -180,12 +180,51 @@ type Instance struct {
 	// BusinessKey is the caller's name for the case, given with
 	// [WithBusinessKey]. Empty when it was started without one, and always
 	// from a server no newer than Metis v0.5.0.
-	BusinessKey string    `json:"business_key,omitempty"`
-	CreatedAt   time.Time `json:"created_at,omitzero"`
+	BusinessKey string `json:"business_key,omitempty"`
+	// Tokens are where the instance stands: one for each path it is on.
+	// [Client.GetInstance] sends them; listings leave them out.
+	Tokens    []Token   `json:"tokens,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitzero"`
 }
 
 // IsFinished reports whether the instance has stopped for good.
 func (i Instance) IsFinished() bool { return i.Status.IsFinished() }
+
+// WaitingAt reports whether one of the instance's paths stands at step,
+// active — at a receive task or a catch event, that is the instance waiting
+// for what the step catches. It reads [Instance.Tokens], so it is only
+// meaningful on an instance from [Client.GetInstance].
+func (i Instance) WaitingAt(step string) bool {
+	for _, t := range i.Tokens {
+		if t.Step.ID == step && t.Status == TokenActive {
+			return true
+		}
+	}
+	return false
+}
+
+// Token is one place an instance stands — a path through the diagram, and the
+// step it has reached.
+type Token struct {
+	ID string `json:"id"`
+	// Step is where the path stands. The server sends its ID only.
+	Step   StepRef     `json:"node"`
+	Status TokenStatus `json:"status"`
+	// CreatedAt is when the path reached the step.
+	CreatedAt time.Time `json:"created_at,omitzero"`
+}
+
+// TokenStatus is whether a path is moving.
+type TokenStatus string
+
+const (
+	// TokenActive stands at its step: running it, or waiting there.
+	TokenActive TokenStatus = "active"
+	// TokenSuspended was paused with its instance.
+	TokenSuspended TokenStatus = "suspended"
+	// TokenCompleted has finished its path.
+	TokenCompleted TokenStatus = "completed"
+)
 
 // Ref names the instance, to keep or hand on without the rest of it.
 func (i Instance) Ref() InstanceRef { return InstanceRef{ID: i.ID} }
