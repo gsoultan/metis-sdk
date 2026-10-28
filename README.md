@@ -820,6 +820,54 @@ meant. On the wire a reference is the bare ID, as the server sends it. Calls
 that take an object to act on still take its ID as a string; `ref.ID` is
 always there.
 
+## Reading a whole listing
+
+Every paged listing has an `All…` form that walks every page as a
+range-over-func loop, asking for the next page only when the loop gets there:
+
+```go
+for task, err := range client.AllTasks(ctx, metis.ListTasksOptions{ProjectID: p}) {
+	if err != nil {
+		return err // the first error ends the walk
+	}
+	fmt.Println(task.Name)
+}
+```
+
+`AllInstances`, `AllTasks`, `AllClaimableTasks`, `AllDefinitions` and
+`AllBatchOperationItems` read numbered pages; `AllOperations` and
+`AllOutgoingWebhookDeliveries` follow the cursor each page hands back. Breaking
+out of the loop stops the reading.
+
+A listing changes while it is read. The numbered ones are newest first, so a
+row added during the walk pushes older rows onto the next page; rows are told
+apart by ID and each is yielded once. A row that leaves the listing pulls the
+others up instead, and the one that moves back onto a page already read is
+missed, so narrow the listing to rows that will stay in it when that matters.
+A server that answers the same rows whatever page is asked for ends the walk
+with `ErrPagingStalled` rather than looping.
+
+## Retrying reads
+
+`WithRetry` sends a read again when it got no answer, or an answer that may
+pass: 429, 500, 502, 503 or 504. Waits double from `Base`, less a random part
+so many clients do not come back together, and a `Retry-After` from the server
+is honoured up to `Max`.
+
+```go
+client := metis.NewClient(url, metis.WithRetry(metis.RetryPolicy{
+	Attempts: 4,                      // in all, the first included
+	Base:     200 * time.Millisecond, // the default
+	Max:      30 * time.Second,       // the default
+}))
+```
+
+Only GET requests are retried. A start, a completion or any other write is sent
+once whatever the policy says: the server has no idempotency key for them, so a
+write whose answer was lost may have happened, and sending it again could do it
+twice. `APIError.RetryAfter` carries the server's `Retry-After` for code that
+retries writes itself after looking first.
+
 ## Errors
 
 Non-2xx answers come back as `*metis.APIError`, carrying the status and the

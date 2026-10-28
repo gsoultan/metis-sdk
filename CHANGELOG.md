@@ -89,6 +89,16 @@ named another object by ID, it now holds a typed reference. See **Changed**.
   exported diagram.
 - **`ListClaimableTasks`**: the unclaimed tasks the signed-in user may
   claim, through their own name or their groups. Served since Metis v0.2.0.
+- **Whole listings.** `AllInstances`, `AllTasks`, `AllClaimableTasks`,
+  `AllDefinitions`, `AllBatchOperationItems`, `AllOperations` and
+  `AllOutgoingWebhookDeliveries` walk every page as an `iter.Seq2`, reading a
+  page only when the loop reaches it. Rows pushed onto the next page by inserts
+  are yielded once; a server that ignores paging ends the walk with
+  `ErrPagingStalled`.
+- **`WithRetry(RetryPolicy{...})`** sends a GET again after a network failure
+  or a 429, 500, 502, 503 or 504, with jittered doubling waits and the
+  server's `Retry-After` honoured up to `Max`. Writes are never retried.
+  `APIError.RetryAfter` carries the header. Off unless set.
 - **Case work.** `UpdateTask` renames a task, sets its priority, and moves or
   removes its due date, with a reason; `ActivateAdHocTask` starts an optional
   step of an ad-hoc sub-process. Served since Metis v0.3.0.
