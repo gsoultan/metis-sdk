@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -48,7 +49,10 @@ func newFakeServer(t *testing.T) (*fakeServer, *Client) {
 			Org:    r.Header.Get("X-Organization-ID"),
 		}
 		if r.Body != nil {
-			_ = json.NewDecoder(r.Body).Decode(&record.Body)
+			// Read once and put back, so a handler can read the body too.
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &record.Body)
+			r.Body = io.NopCloser(bytes.NewReader(raw))
 		}
 		f.mu.Lock()
 		f.requests = append(f.requests, record)
@@ -58,6 +62,11 @@ func newFakeServer(t *testing.T) (*fakeServer, *Client) {
 	}))
 	t.Cleanup(server.Close)
 	return f, NewClient(server.URL, WithToken("test-token"))
+}
+
+// decodeJSON reads a request's JSON body inside a test handler.
+func decodeJSON(r *http.Request, into any) error {
+	return json.NewDecoder(r.Body).Decode(into)
 }
 
 func (f *fakeServer) respond(pattern string, status int, body string) {
