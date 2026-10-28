@@ -546,6 +546,47 @@ billion-laughs and `file:///etc/passwd` payloads both fail to parse. Sub-process
 nesting is bounded at 100 levels, because the walk recurses and a Go stack
 overflow cannot be recovered. Both are pinned by tests.
 
+## People
+
+People are the members of a project's own directory: the employees, customers
+or suppliers a process hands work to, as opposed to the Users who run Metis. A
+person signs in to one project and sees only the tasks the process gives them.
+Their token works the People calls and nothing else, so use a client of its own:
+
+```go
+person := metis.NewClient(baseURL)
+session, err := person.LoginPerson(ctx, projectID, "ana", password)
+
+tasks, page, err := person.ListPersonTasks(ctx, metis.PageOptions{PageSize: 20})
+err = person.ClaimPersonTask(ctx, taskID)
+err = person.CompletePersonTask(ctx, taskID, metis.Variables{"signed": true})
+err = person.ReleasePersonTask(ctx, taskID)                 // give it back
+```
+
+**A person's own system** works their tasks with one of their API keys. They make
+it once, signed in, and the token is shown that one time:
+
+```go
+key, token, err := person.CreatePersonAPIKey(ctx, "payroll export")
+// store token where the payroll system can read it; then, over there:
+payroll := metis.NewClient(baseURL, metis.WithToken(token))
+tasks, _, err := payroll.ListPersonTasks(ctx, metis.PageOptions{})
+```
+
+A key works tasks and nothing more: making, listing and revoking keys
+(`ListPersonAPIKeys`, `RevokePersonAPIKey`) take the person's sign-in.
+
+**Task links** are mailed to a person so they can do one task without signing
+in. A page of your own that the link opens reads and completes it with the
+link's token, which the SDK sends in the body rather than the address:
+
+```go
+link, err := client.ReadTaskLink(ctx, token)        // changes nothing
+err = client.CompleteByTaskLink(ctx, token, metis.Variables{"approved": true})
+```
+
+People need a server newer than Metis v0.5.0 with `METIS_PEOPLE_TOKEN_KEY` set.
+
 ## External-task workers
 
 A `Worker` is how your own service performs a step of someone else's process:
@@ -803,6 +844,7 @@ corrected in those releases.
 | `WorkerOptions.Version`, `WithWorkerVersion` | Ignored. |
 | Simulating a draft (`Definition`, `BPMNXML`) or a replay | Refused with a 400 (`IsInvalid`): a replay or a `.bpmn` draft with a message saying it is not supported yet, a `Definition` draft as an unreadable request. `Simulate` and `SimulateBatch` of a deployed version work on both. |
 | Saved simulation cases, outgoing webhooks, `SimulateWebhookDelivery`, batch operations, `ListExternalTaskWorkers`, `ListOperations`, retention holds and periods | No such route: `IsNotFound`. |
+| People: `LoginPerson`, the person's tasks, API keys and task links | No such route. A request with a User's token answers `IsNotFound`; one with no token the server knows, such as every `LoginPerson`, answers `IsUnauthorized`. |
 
 Going the other way, a v0.5.0 server asks two things of code written for an
 older one: a `WithReason` on a hand-over by anybody but the task's holder, and a
