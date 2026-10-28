@@ -822,10 +822,11 @@ result, err := client.EvaluateDecision(ctx, projectID, "credit-limit", metis.Var
 limit, _ := result.Values.Int("limit") // result.MatchedRuleIDs says which lines decided
 ```
 
-Deploying a new version does not make it the one that starts. `ListVersions`
-shows which is live and how much each still runs; `PromoteVersion` makes one
-live now, `ScheduleVersion` at a set time, and `CancelScheduledVersion` drops a
-cutover not yet reached.
+`ImportDefinition` makes the version it deploys the one new instances start
+on. `ListVersions` shows which is live and how much each still runs;
+`PromoteVersion` makes another one live now (to roll back, say),
+`ScheduleVersion` at a set time, and `CancelScheduledVersion` drops a cutover
+not yet reached.
 
 For a dashboard or a health check, `ListInstancesPage` returns a page with the
 project-wide counts by status and of instances needing attention, in one
