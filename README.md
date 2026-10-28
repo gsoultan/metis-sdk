@@ -847,6 +847,29 @@ shows which is live and how much each still runs; `PromoteVersion` makes one
 live now, `ScheduleVersion` at a set time, and `CancelScheduledVersion` drops a
 cutover not yet reached.
 
+`ReleaseVersion` is a release with a guard in front. It checks that the
+diagram holds the process, runs every saved simulation case on it as a draft,
+and deploys only if they all pass; otherwise `ErrReleaseBlocked` comes back
+with the failures and nothing is deployed. The report names the version
+released, the one that was live before, and the older versions still running
+instances. With `PlanMigrations` it carries, for each of those, a dry-run plan
+of moving their instances across.
+
+```go
+report, err := client.ReleaseVersion(ctx, projectID, "expense", bpmn,
+	metis.ReleaseOptions{RequireCases: true, PlanMigrations: true})
+if errors.Is(err, metis.ErrReleaseBlocked) {
+	for _, r := range report.Failed() {
+		log.Printf("%s: %s", r.Case.Name, strings.Join(r.Misses, "; "))
+	}
+}
+```
+
+`PlanMigration` asks for one such plan on its own: where the work sits, where
+it would land, and what refuses or warns. It never moves anything. Applying a
+migration rewrites running cases and can need acknowledgements and a second
+administrator, so do that in the designer.
+
 For a dashboard or a health check, `ListInstancesPage` returns a page with the
 project-wide counts by status and of instances needing attention, in one
 request. `ListWaiting` says on which steps running work sits, `ListDeadlines`
@@ -1045,6 +1068,7 @@ corrected in those releases.
 | Needs a release newer than Metis v0.5.0 | Against v0.5.0 and earlier |
 | :-- | :-- |
 | `WithBusinessKey` | Ignored: the instance starts without a key. |
+| `ReleaseVersion` | The saved cases cannot be read or run on a draft: an error, `IsNotFound` or `IsInvalid`, and nothing is deployed. |
 | `StartProcessOnce`, and `StartMany` for requests with a business key | The server keeps no business key, so the case cannot be found again. Once the project has any instance the call is refused with `ErrFilterUnsupported`, from the listing it reads first; in an empty project it starts one without the key. |
 | `ListInstancesOptions.BusinessKey` | Refused with `ErrFilterUnsupported`, as for the instance filter above: the server lists every instance, and the SDK will not hand that back as the case's. |
 | `WorkerOptions.Version`, `WithWorkerVersion` | Ignored. |
