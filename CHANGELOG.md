@@ -6,6 +6,29 @@ while the major version is 0 the API may still move.
 
 ## [Unreleased]
 
+### Added
+
+- **People.** The members of a project's own directory sign in and work their
+  tasks through routes of their own, and the client now reaches them.
+  `LoginPerson` signs a person in to their project and keeps the token, as
+  `Login` does for a User; `CurrentPerson` says who it is. `ListPersonTasks`,
+  `GetPersonTask`, `ClaimPersonTask`, `ReleasePersonTask` and
+  `CompletePersonTask` work the person's tasks, acting as the token and never
+  as anybody a request names.
+- **A person's API keys.** `CreatePersonAPIKey` makes one for a system of the
+  person's own and returns its token, shown that once; pass it to `WithToken`
+  and the client works the person's tasks. `ListPersonAPIKeys` and
+  `RevokePersonAPIKey` manage them. Only a sign-in can make, list or revoke a
+  key; a key cannot.
+- **Task links.** `ReadTaskLink` shows the task a mailed link is for without
+  changing anything, and `CompleteByTaskLink` completes it as the link's
+  person. The link's token travels in the body, out of access logs.
+
+All of it needs a Metis server newer than v0.5.0 with People sign-in switched
+on (`METIS_PEOPLE_TOKEN_KEY`).
+
+## [0.3.0] — 2026-10-23
+
 Brings the client up to what Metis has gained since v0.5.0. Everything here
 needs a server newer than **v0.5.0**; against v0.5.0 and earlier the new calls
 answer `IsNotFound`, and the README's compatibility table says what each of the
