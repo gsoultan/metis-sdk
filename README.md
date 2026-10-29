@@ -766,6 +766,46 @@ One operation takes up to 10,000 instances and is worked through in the
 background, each exactly as the single-instance retry or cancel; it can be
 stopped with `StopBatchOperation`. Fix the cause before a retry.
 
+After an outage, `RetryFailed` does the preview, the guard and the start in one
+call. It retries the failed step of every instance with an open incident that
+the filter matches, refuses with `ErrTooMany` when more match than
+`MaxInstances` (100 by default), and stops the operation at once if more
+failed between the preview and the start. `WaitForBatch` reads the operation
+until it has finished.
+
+```go
+started, err := client.RetryFailed(ctx, projectID, metis.RetryFailedOptions{
+	Reason:       "the payment provider is back",
+	Filter:       metis.BatchFilter{DefinitionID: payments.ID},
+	MaxInstances: 500,
+})
+if err != nil {
+	return err // errors.Is(err, metis.ErrTooMany): narrow the filter
+}
+done, err := client.WaitForBatch(ctx, started.Operation.ID, 0)
+```
+
+`WatchIncidents` yields each open incident of a project once, as it appears,
+for paging someone. The server has no project-wide incident listing, so each
+look lists the instances needing attention and reads each one's incidents; poll
+accordingly (30 seconds by default). A look that fails in a way that may pass
+is yielded as an error and the watch goes on.
+
+```go
+for incident, err := range client.WatchIncidents(ctx, projectID, metis.WatchOptions{}) {
+	if err != nil {
+		log.Print(err)
+		continue
+	}
+	alert(incident)
+}
+```
+
+`StartMany` starts one instance per request, a few at a time (4 by default, 32
+at most), and returns a result per request in order. A request with a business
+key goes through `StartProcessOnce`, so an import run twice starts each case
+once.
+
 For an administrator, `ListOperations` reads the organization's **audit log** —
 who cancelled, waived, migrated or handed over what, newest first — and the
 retention calls keep an instance from the retention sweep
@@ -986,7 +1026,7 @@ corrected in those releases.
 | Needs a release newer than Metis v0.5.0 | Against v0.5.0 and earlier |
 | :-- | :-- |
 | `WithBusinessKey` | Ignored: the instance starts without a key. |
-| `StartProcessOnce` | The server keeps no business key, so the case cannot be found again. Once the project has any instance the call is refused with `ErrFilterUnsupported`, from the listing it reads first; in an empty project it starts one without the key. |
+| `StartProcessOnce`, and `StartMany` for requests with a business key | The server keeps no business key, so the case cannot be found again. Once the project has any instance the call is refused with `ErrFilterUnsupported`, from the listing it reads first; in an empty project it starts one without the key. |
 | `ListInstancesOptions.BusinessKey` | Refused with `ErrFilterUnsupported`, as for the instance filter above: the server lists every instance, and the SDK will not hand that back as the case's. |
 | `WorkerOptions.Version`, `WithWorkerVersion` | Ignored. |
 | Simulating a draft (`Definition`, `BPMNXML`) or a replay | Refused with a 400 (`IsInvalid`): a replay or a `.bpmn` draft with a message saying it is not supported yet, a `Definition` draft as an unreadable request. `Simulate` and `SimulateBatch` of a deployed version work on both. |

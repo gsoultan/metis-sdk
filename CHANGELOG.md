@@ -103,6 +103,12 @@ named another object by ID, it now holds a typed reference. See **Changed**.
   somebody else's with a `*TaskConflictError` matching `ErrTaskTakenByOther`
   or `ErrTaskClosed`. `CurrentUser` says who is signed in, from `Login` or
   `GET /api/v1/users/me` (v0.5.0).
+- **Operating after an outage.** `RetryFailed` previews, refuses more than
+  `MaxInstances` with `ErrTooMany`, and starts one retry batch operation,
+  stopping it at once if it took more than allowed. `WaitForBatch` waits for an
+  operation to finish. `WatchIncidents` yields each open incident of a project
+  once as it appears. `StartMany` starts many instances with bounded
+  concurrency, each case once when it has a business key.
 - **Whole listings.** `AllInstances`, `AllTasks`, `AllClaimableTasks`,
   `AllDefinitions`, `AllBatchOperationItems`, `AllOperations` and
   `AllOutgoingWebhookDeliveries` walk every page as an `iter.Seq2`, reading a
