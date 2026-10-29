@@ -731,6 +731,26 @@ func handle(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+`WebhookHandler` does that whole receiver: it verifies, answers a repeat of a
+delivery already handled without handling it again, and routes by event with
+`WebhookHandlers`. An event with no function is accepted and left alone.
+
+```go
+http.Handle("/hooks/metis", metis.WebhookHandler(secret,
+	metis.WebhookHandlers{
+		metis.EventTaskCreated:    notifyAssignee,
+		metis.EventIncidentRaised: pageOnCall,
+	}.Handle,
+	metis.WebhookHandlerOptions{}))
+```
+
+It answers 204 when the function returned nil or the delivery was handled
+before, and 500 when the function failed, so Metis sends it again. A forged or
+stale delivery gets 401, and a repeat that arrives while the first is still
+being handled gets 409. Handled IDs are kept in memory (10,000 by default).
+Behind a load balancer, give it a `DeliveryStore` the receivers share. Either
+way, make the function safe to run twice for one delivery.
+
 A delivery carries no process variables, and an `incident.raised` one names the
 incident without its text; ask the API for either. `SendOutgoingWebhookTest`
 posts a signed sample now and returns the request and the answer, and

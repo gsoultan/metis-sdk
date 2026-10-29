@@ -103,6 +103,10 @@ named another object by ID, it now holds a typed reference. See **Changed**.
   somebody else's with a `*TaskConflictError` matching `ErrTaskTakenByOther`
   or `ErrTaskClosed`. `CurrentUser` says who is signed in, from `Login` or
   `GET /api/v1/users/me` (v0.5.0).
+- **`WebhookHandler`** is a whole receiver for outgoing webhooks. It verifies
+  each delivery, answers a repeat of one already handled without handling it
+  again (`DeliveryStore`, with `NewMemoryDeliveryStore` for one process), and
+  answers so that Metis retries what failed. `WebhookHandlers` routes by event.
 - **Operating after an outage.** `RetryFailed` previews, refuses more than
   `MaxInstances` with `ErrTooMany`, and starts one retry batch operation,
   stopping it at once if it took more than allowed. `WaitForBatch` waits for an
