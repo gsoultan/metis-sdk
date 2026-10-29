@@ -15,8 +15,9 @@ import (
 // Only reads (GET) are retried. A start, a completion or any other write is
 // sent once, whatever the policy says: the server has no idempotency key for
 // them, so a write whose answer was lost may well have happened, and sending
-// it again could do it twice. Look before acting again instead: find the
-// instance by its business key, or read the task to see if it is still open.
+// it again could do it twice. [Client.StartProcessOnce],
+// [Client.CompleteTaskSafely] and [Client.ClaimAndComplete] look before they
+// act instead, and can be called again after a failure.
 //
 // The zero value retries nothing, which is the client's default.
 type RetryPolicy struct {
