@@ -271,8 +271,17 @@ type ListInstancesOptions struct {
 //		PageSize:  50,
 //	})
 func (c *Client) ListInstances(ctx context.Context, opts ListInstancesOptions) ([]Instance, *PageInfo, error) {
+	page, err := c.ListInstancesPage(ctx, opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	return page.Instances, page.Page, nil
+}
+
+// query is the listing's query string, refused without a project.
+func (opts ListInstancesOptions) query() (url.Values, error) {
 	if opts.ProjectID == "" {
-		return nil, nil, errors.New("metis: ListInstances needs a project ID — the server refuses an empty one rather than listing the whole organization")
+		return nil, errors.New("metis: ListInstances needs a project ID — the server refuses an empty one rather than listing the whole organization")
 	}
 	query := url.Values{"project_id": {opts.ProjectID}}
 	if opts.Page > 0 {
@@ -293,18 +302,7 @@ func (c *Client) ListInstances(ctx context.Context, opts ListInstancesOptions) (
 	if opts.NeedsAttention {
 		query.Set("needs_attention", "true")
 	}
-
-	var out struct {
-		Instances []Instance `json:"instances"`
-		Page      *PageInfo  `json:"page"`
-	}
-	if err := c.do(ctx, http.MethodGet, "/api/v1/instances?"+query.Encode(), nil, &out); err != nil {
-		return nil, nil, err
-	}
-	if err := verifyBusinessKeyFilter(opts.BusinessKey, out.Instances); err != nil {
-		return nil, nil, err
-	}
-	return out.Instances, out.Page, nil
+	return query, nil
 }
 
 // verifyBusinessKeyFilter checks the server narrowed to the business key asked
@@ -861,6 +859,29 @@ func (c *Client) ListDelegatedTasks(ctx context.Context, page PageOptions) ([]Us
 		Tasks []UserTask `json:"tasks"`
 	}
 	err := c.do(ctx, http.MethodGet, path, nil, &out)
+	return out.Tasks, out.Page, err
+}
+
+// ListClaimableTasks returns the unclaimed tasks the signed-in user may claim:
+// those naming them among the candidate users, those offered to a group they
+// belong to, and, for an administrator or an operator, those naming nobody.
+// It is the pool a person picks work from before [Client.ClaimTask].
+//
+// It is always the caller's own: the server takes the user from the token and
+// the groups from the memberships it holds, so there is nothing to name.
+func (c *Client) ListClaimableTasks(ctx context.Context, page PageOptions) ([]UserTask, *PageInfo, error) {
+	body := map[string]any{}
+	if page.Page > 0 {
+		body["page"] = page.Page
+	}
+	if page.PageSize > 0 {
+		body["page_size"] = page.PageSize
+	}
+	var out struct {
+		Page  *PageInfo  `json:"page"`
+		Tasks []UserTask `json:"tasks"`
+	}
+	err := c.do(ctx, http.MethodPost, "/api/v1/tasks/candidates", body, &out)
 	return out.Tasks, out.Page, err
 }
 

@@ -11,6 +11,9 @@ needs a server newer than **v0.5.0**; against v0.5.0 and earlier the new calls
 answer `IsNotFound`, and the README's compatibility table says what each of the
 rest does. Nothing that worked against an older server stops working.
 
+Some additions reach routes the server has had for longer, and say so in
+their entries.
+
 ### Added
 
 - **Business keys.** `StartProcess` takes `WithBusinessKey("ORDER-4411")`, and
@@ -59,6 +62,33 @@ rest does. Nothing that worked against an older server stops working.
 - **Retention.** `GetRetentionHold`, `PlaceRetentionHold`,
   `ReleaseRetentionHold`, `ListRetentionHolds`; and `SetRetentionPeriod`,
   `ListRetentionPeriods`, `RetentionPeriodHistory` for a process's own period.
+- **Decisions.** `EvaluateDecision` runs a DMN table on inputs without
+  starting a process, the live version or one named by
+  `WithDecisionVersion`, and `DecisionResult` says which lines matched and
+  which version decided. Served since Metis v0.3.0.
+- **Versions.** `ListLiveVersions`, `ListVersions` (with running counts and
+  any cutover arranged), `PromoteVersion`, `ScheduleVersion` and
+  `CancelScheduledVersion`. Served since Metis v0.3.0.
+- **Where work stands.** `ListInstancesPage` is `ListInstances` with the
+  project-wide `StatusCounts` and `NeedsAttention` the server already sent
+  and the SDK dropped. `ListSubProcesses` follows call activities to their
+  child instances (v0.3.0). `ListWaiting` counts running work per step, and
+  `ListDeadlines` lists open tasks with a due date, overdue first, with
+  `Deadlines.Overdue` (v0.4.0).
+- **User tasks in flow order.** `ListUserTasksInOrder` and `ParseFlow` read
+  a diagram into a `Flow` per process whose `Steps` are in the order work
+  reaches them — Submit, Checker, Approval — each linked to the steps
+  that come `Next()` and `Previous()`, gateways and system steps passed
+  over, a send-back told apart by `SendsBackTo`. A step carries its lane,
+  the `SubProcess` holding it, its documentation, who it is for
+  (`Assignment`: assignee, candidate users and groups, form) and how it
+  repeats (`MultiInstance`). Works against every server: it reads the
+  exported diagram.
+- **`ListClaimableTasks`**: the unclaimed tasks the signed-in user may
+  claim, through their own name or their groups. Served since Metis v0.2.0.
+- **Case work.** `UpdateTask` renames a task, sets its priority, and moves or
+  removes its due date, with a reason; `ActivateAdHocTask` starts an optional
+  step of an ad-hoc sub-process. Served since Metis v0.3.0.
 
 ### Changed
 
