@@ -244,7 +244,7 @@ type SimulationIncident struct {
 // SimulationReplay is what a replay read off the real instance, and where the
 // run and the instance went apart.
 type SimulationReplay struct {
-	InstanceID string `json:"instance_id"`
+	Instance InstanceRef `json:"instance_id"`
 	// Version is the version the instance ran on, Status where it is now.
 	Version int    `json:"version"`
 	Status  string `json:"status"`
@@ -336,14 +336,29 @@ const MaxSimulationCases = 20
 // how it is answered, and what it must end with. It is kept by process key, so
 // it runs against every version, the next one included.
 type SimulationCase struct {
-	ID         string                `json:"id,omitempty"`
-	ProjectID  string                `json:"project_id,omitempty"`
-	ProcessKey string                `json:"process_key,omitempty"`
-	Name       string                `json:"name"`
-	Scenario   SimulationScenario    `json:"scenario"`
-	Expect     SimulationExpectation `json:"expect"`
-	CreatedAt  time.Time             `json:"created_at,omitzero"`
-	UpdatedAt  time.Time             `json:"updated_at,omitzero"`
+	ID string `json:"id,omitempty"`
+	// Process is the process the case belongs to; the server fills it in.
+	Process   ProcessRef            `json:"-"`
+	Name      string                `json:"name"`
+	Scenario  SimulationScenario    `json:"scenario"`
+	Expect    SimulationExpectation `json:"expect"`
+	CreatedAt time.Time             `json:"created_at,omitzero"`
+	UpdatedAt time.Time             `json:"updated_at,omitzero"`
+}
+
+// UnmarshalJSON reads the process from project_id and process_key.
+func (sc *SimulationCase) UnmarshalJSON(data []byte) error {
+	type plain SimulationCase
+	var wire struct {
+		plain
+		processWire
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*sc = SimulationCase(wire.plain)
+	sc.Process = wire.process()
+	return nil
 }
 
 // SimulationScenario is what a case starts with and how it is answered.

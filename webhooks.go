@@ -44,7 +44,7 @@ const (
 // OutgoingWebhook is an address a project's events are posted to.
 type OutgoingWebhook struct {
 	ID        string         `json:"id"`
-	ProjectID string         `json:"project_id"`
+	Project   ProjectRef     `json:"project_id"`
 	Name      string         `json:"name"`
 	URL       string         `json:"url"`
 	Events    []WebhookEvent `json:"events"`
@@ -114,8 +114,8 @@ func outgoingWebhookPath(webhookID string) string {
 // WebhookTest is a test delivery: the request exactly as it went out, and what
 // the receiver said back.
 type WebhookTest struct {
-	DeliveryID string       `json:"delivery_id"`
-	Event      WebhookEvent `json:"event"`
+	Delivery DeliveryRef  `json:"delivery_id"`
+	Event    WebhookEvent `json:"event"`
 	// Accepted is whether the receiver answered 2xx in time.
 	Accepted   bool  `json:"accepted"`
 	DurationMS int64 `json:"duration_ms"`
@@ -169,11 +169,11 @@ const (
 
 // WebhookDelivery is one entry of a webhook's delivery log.
 type WebhookDelivery struct {
-	ID        string         `json:"id"`
-	WebhookID string         `json:"webhook_id"`
-	Event     WebhookEvent   `json:"event"`
-	Status    DeliveryStatus `json:"status"`
-	Attempts  int            `json:"attempts"`
+	ID       string         `json:"id"`
+	Webhook  WebhookRef     `json:"webhook_id"`
+	Event    WebhookEvent   `json:"event"`
+	Status   DeliveryStatus `json:"status"`
+	Attempts int            `json:"attempts"`
 	// NextAttemptAt is set only while the delivery is pending.
 	NextAttemptAt  *time.Time `json:"next_attempt_at,omitempty"`
 	LastAttemptAt  *time.Time `json:"last_attempt_at,omitempty"`
@@ -338,7 +338,7 @@ type Delivery struct {
 	EventID    string       `json:"event_id"`
 	Event      WebhookEvent `json:"event"`
 	OccurredAt time.Time    `json:"occurred_at"`
-	ProjectID  string       `json:"project_id"`
+	Project    ProjectRef   `json:"project_id"`
 
 	Instance *DeliveryInstance `json:"instance,omitempty"`
 	Node     *DeliveryNode     `json:"node,omitempty"`
@@ -353,14 +353,48 @@ type Delivery struct {
 	DeliveryID string `json:"-"`
 }
 
-// DeliveryInstance is the case an event is about.
+// UnmarshalJSON reads a delivery and gives its instance's process the
+// delivery's project, which the body names once.
+func (d *Delivery) UnmarshalJSON(data []byte) error {
+	type plain Delivery
+	var wire plain
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*d = Delivery(wire)
+	if d.Instance != nil {
+		d.Instance.Process.Project = d.Project
+	}
+	return nil
+}
+
+// DeliveryInstance is the case an event is about, as the delivery describes
+// it; [DeliveryInstance.Ref] loads the instance itself.
 type DeliveryInstance struct {
 	ID             string        `json:"id"`
 	BusinessKey    string        `json:"business_key,omitempty"`
-	ProcessKey     string        `json:"process_key,omitempty"`
+	Process        ProcessRef    `json:"-"`
 	ProcessName    string        `json:"process_name,omitempty"`
 	ProcessVersion int           `json:"process_version,omitempty"`
 	Status         ProcessStatus `json:"status,omitempty"`
+}
+
+// Ref names the instance.
+func (i DeliveryInstance) Ref() InstanceRef { return InstanceRef{ID: i.ID} }
+
+// UnmarshalJSON reads the process from process_key.
+func (i *DeliveryInstance) UnmarshalJSON(data []byte) error {
+	type plain DeliveryInstance
+	var wire struct {
+		plain
+		ProcessKey string `json:"process_key"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*i = DeliveryInstance(wire.plain)
+	i.Process.Key = wire.ProcessKey
+	return nil
 }
 
 // DeliveryNode is the step an event happened at.
@@ -369,16 +403,25 @@ type DeliveryNode struct {
 	Name string `json:"name,omitempty"`
 }
 
+// Ref names the step.
+func (n DeliveryNode) Ref() StepRef { return StepRef{ID: n.ID, Name: n.Name} }
+
 // DeliveryTask is the task a task event is about.
 type DeliveryTask struct {
 	ID       string `json:"id,omitempty"`
 	Assignee string `json:"assignee,omitempty"`
 }
 
+// Ref names the task.
+func (t DeliveryTask) Ref() TaskRef { return TaskRef{ID: t.ID} }
+
 // DeliveryIncident is the incident an incident event is about.
 type DeliveryIncident struct {
 	ID string `json:"id"`
 }
+
+// Ref names the incident.
+func (i DeliveryIncident) Ref() IncidentRef { return IncidentRef{ID: i.ID} }
 
 // maxDeliveryBytes bounds what ReadWebhook reads of a request. A delivery
 // carries no variables, so a real one is a few hundred bytes.
@@ -460,23 +503,70 @@ type WebhookSimulationResult struct {
 	AlreadyReceived bool `json:"already_received,omitempty"`
 	// Waiting is the first few instances a real delivery would move on, of
 	// WaitingTotal.
-	Waiting []struct {
-		InstanceID  string    `json:"instance_id"`
-		ProcessKey  string    `json:"process_key,omitempty"`
-		ProcessName string    `json:"process_name,omitempty"`
-		BusinessKey string    `json:"business_key,omitempty"`
-		NodeID      string    `json:"node_id"`
-		NodeName    string    `json:"node_name,omitempty"`
-		Since       time.Time `json:"since"`
-	} `json:"waiting"`
-	WaitingTotal int `json:"waiting_total"`
+	Waiting      []WebhookWaiter `json:"waiting"`
+	WaitingTotal int             `json:"waiting_total"`
 	// Starts is the processes a real delivery would start, which only an
 	// uncorrelated webhook does.
-	Starts []struct {
+	Starts []WebhookStart `json:"starts,omitempty"`
+}
+
+// WebhookWaiter is an instance a delivery would move on, and the step it
+// waits at. Its process names no project: the answer does not say which.
+type WebhookWaiter struct {
+	Instance    InstanceRef
+	Process     ProcessRef
+	ProcessName string
+	BusinessKey string
+	Step        StepRef
+	Since       time.Time
+}
+
+// UnmarshalJSON reads a waiter as the server writes it.
+func (w *WebhookWaiter) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		InstanceID  string    `json:"instance_id"`
+		ProcessKey  string    `json:"process_key"`
+		ProcessName string    `json:"process_name"`
+		BusinessKey string    `json:"business_key"`
+		NodeID      string    `json:"node_id"`
+		NodeName    string    `json:"node_name"`
+		Since       time.Time `json:"since"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*w = WebhookWaiter{
+		Instance:    InstanceRef{ID: wire.InstanceID},
+		Process:     ProcessRef{Key: wire.ProcessKey},
+		ProcessName: wire.ProcessName,
+		BusinessKey: wire.BusinessKey,
+		Step:        StepRef{ID: wire.NodeID, Name: wire.NodeName},
+		Since:       wire.Since,
+	}
+	return nil
+}
+
+// WebhookStart is a process a delivery would start. Its process names no
+// project: the answer does not say which.
+type WebhookStart struct {
+	Process     ProcessRef
+	ProcessName string
+	// StartEvent is the label of the start event it would start at.
+	StartEvent string
+}
+
+// UnmarshalJSON reads a start as the server writes it.
+func (s *WebhookStart) UnmarshalJSON(data []byte) error {
+	var wire struct {
 		ProcessKey  string `json:"process_key"`
-		ProcessName string `json:"process_name,omitempty"`
-		NodeName    string `json:"node_name,omitempty"`
-	} `json:"starts,omitempty"`
+		ProcessName string `json:"process_name"`
+		NodeName    string `json:"node_name"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*s = WebhookStart{Process: ProcessRef{Key: wire.ProcessKey}, ProcessName: wire.ProcessName, StartEvent: wire.NodeName}
+	return nil
 }
 
 // SimulateWebhookDelivery tries a delivery against one of the project's

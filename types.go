@@ -187,6 +187,9 @@ type Instance struct {
 // IsFinished reports whether the instance has stopped for good.
 func (i Instance) IsFinished() bool { return i.Status.IsFinished() }
 
+// Ref names the instance, to keep or hand on without the rest of it.
+func (i Instance) Ref() InstanceRef { return InstanceRef{ID: i.ID} }
+
 // ProcessInstance is the former name of [Instance].
 //
 // Deprecated: use [Instance]. This alias will be removed in a future release.
@@ -275,6 +278,19 @@ func (t UserTask) NodeID() string {
 	return t.Node.ID
 }
 
+// Ref names the task.
+func (t UserTask) Ref() TaskRef { return TaskRef{ID: t.ID} }
+
+// Step names the BPMN element the task was created for, zero when the
+// response carried no node. Step().In(flow) finds it in a [Flow] read from the
+// same definition.
+func (t UserTask) Step() StepRef {
+	if t.Node == nil {
+		return StepRef{}
+	}
+	return StepRef{ID: t.Node.ID, Name: t.Name}
+}
+
 // Task is the former name of [UserTask].
 //
 // Deprecated: use [UserTask]. The package has two kinds of task and the bare
@@ -334,10 +350,10 @@ func (t ExternalTask) NodeID() string {
 type AuditEntry struct {
 	// ID names the entry. Two reads of a trail that overlap carry the same
 	// entry under the same ID.
-	ID        string    `json:"id,omitempty"`
-	Type      string    `json:"type"`
-	NodeID    string    `json:"node_id,omitempty"`
-	NodeName  string    `json:"node_name,omitempty"`
+	ID   string `json:"id,omitempty"`
+	Type string `json:"type"`
+	// Step is where it happened; zero for an entry about the whole instance.
+	Step      StepRef   `json:"-"`
 	Message   string    `json:"message"`
 	Narrative string    `json:"narrative,omitempty"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
@@ -346,14 +362,15 @@ type AuditEntry struct {
 // UnmarshalJSON reads an entry as the server writes it.
 //
 // The server sends the step as a nested node object and the time as
-// "timestamp", so NodeID, NodeName and CreatedAt, read under their own names
-// alone, always came back empty. Both spellings are accepted; the server's wins
-// where both are present.
+// "timestamp"; older answers sent node_id, node_name and created_at. Both
+// spellings are accepted; the nested one wins where both are present.
 func (e *AuditEntry) UnmarshalJSON(data []byte) error {
 	type plain AuditEntry // no methods, so no recursion
 	var wire struct {
 		plain
-		Node *struct {
+		NodeID   string `json:"node_id"`
+		NodeName string `json:"node_name"`
+		Node     *struct {
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		} `json:"node"`
@@ -363,12 +380,13 @@ func (e *AuditEntry) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*e = AuditEntry(wire.plain)
+	e.Step = StepRef{ID: wire.NodeID, Name: wire.NodeName}
 	if wire.Node != nil {
 		if wire.Node.ID != "" {
-			e.NodeID = wire.Node.ID
+			e.Step.ID = wire.Node.ID
 		}
 		if wire.Node.Name != "" {
-			e.NodeName = wire.Node.Name
+			e.Step.Name = wire.Node.Name
 		}
 	}
 	if !wire.Timestamp.IsZero() {
@@ -394,11 +412,6 @@ type Project struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 }
-
-// ProjectRef is the former name of [Project].
-//
-// Deprecated: use [Project]. This alias will be removed in a future release.
-type ProjectRef = Project
 
 // PageOptions selects one window of a listing that has no filters of its own —
 // everything it narrows by is already in the path. Listings that do have
@@ -458,6 +471,18 @@ func (i Incident) NodeID() string {
 		return ""
 	}
 	return i.Node.ID
+}
+
+// Ref names the incident, to resolve it.
+func (i Incident) Ref() IncidentRef { return IncidentRef{ID: i.ID} }
+
+// Step names the BPMN element the incident happened at, zero when the
+// response carried no node.
+func (i Incident) Step() StepRef {
+	if i.Node == nil {
+		return StepRef{}
+	}
+	return StepRef{ID: i.Node.ID, Name: i.Node.Name}
 }
 
 // ExecutionPath is the route an instance actually took — the steps it reached,

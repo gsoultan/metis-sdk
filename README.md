@@ -516,7 +516,7 @@ Gateways, events and system steps between two user tasks are passed over.
 Steps inside a sub-process come where it stands, with `SubProcess` and
 `Depth()` saying where. `Assignment` says who a step is for and
 `MultiInstance` how it repeats ("two of three managers approve").
-`flows[0].Step(task.NodeID)` finds where a running task sits in the chain.
+`task.Step().In(flows[0])` finds where a running task sits in the chain.
 `ParseFlow` does the same for a diagram you hold, for any kinds of step.
 
 ### Listing a definition's user task nodes
@@ -796,6 +796,30 @@ call activity to the child instance it started.
 
 `UpdateTask` moves a task's due date, priority or name, with a reason, and
 `ActivateAdHocTask` starts an optional step of an ad-hoc sub-process.
+
+## References between objects
+
+Where one object names another, it holds a reference rather than an ID
+string or a half-filled copy: an operation's `Instance` is an `InstanceRef`,
+a deadline's `Process` a `ProcessRef`, an audit entry's `Step` a `StepRef`.
+A reference carries the ID and loads, or acts on, what it names — only when
+asked:
+
+```go
+for _, op := range page.Operations {
+	instance, err := op.Instance.Get(ctx, client) // one request, now
+	...
+}
+started, err := metis.ProjectRef{ID: projectID}.Process("order").Start(ctx, client, vars)
+incidents, err := started.Incidents(ctx, client)
+err = incidents[0].Ref().Resolve(ctx, client)
+step := task.Step().In(flow) // where a running task sits in the diagram
+```
+
+Each kind is its own type, so an instance ID cannot be passed where a task is
+meant. On the wire a reference is the bare ID, as the server sends it. Calls
+that take an object to act on still take its ID as a string; `ref.ID` is
+always there.
 
 ## Errors
 
