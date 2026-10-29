@@ -103,6 +103,13 @@ named another object by ID, it now holds a typed reference. See **Changed**.
   somebody else's with a `*TaskConflictError` matching `ErrTaskTakenByOther`
   or `ErrTaskClosed`. `CurrentUser` says who is signed in, from `Login` or
   `GET /api/v1/users/me` (v0.5.0).
+- **Guarded releases.** `ReleaseVersion` runs a process's saved simulation
+  cases on the new diagram and deploys only if they pass, refusing with
+  `ErrReleaseBlocked` otherwise. Its `ReleaseReport` names the version
+  released, the one live before, the versions still running instances and,
+  with `PlanMigrations`, a dry-run `MigrationPlan` for each. `PlanMigration`
+  asks for one plan; it never applies. Planning is an administrator's, from
+  v0.3.0.
 - **`WebhookHandler`** is a whole receiver for outgoing webhooks. It verifies
   each delivery, answers a repeat of one already handled without handling it
   again (`DeliveryStore`, with `NewMemoryDeliveryStore` for one process), and
