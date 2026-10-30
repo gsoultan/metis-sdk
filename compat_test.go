@@ -15,8 +15,9 @@ func TestDeprecatedTypeNamesStillWork(t *testing.T) {
 		def      DefinitionRef   // → Definition
 		node     NodeRef         // → Node
 		user     UserRef         // → User
-		project  ProjectRef      // → Project
 	)
+	// ProjectRef was the sixth, until the name was taken back for a reference
+	// to a project; see refs.go.
 
 	// Aliases, not conversions: the old and new names are the same type, so
 	// these assignments need no cast in either direction.
@@ -26,7 +27,6 @@ func TestDeprecatedTypeNamesStillWork(t *testing.T) {
 		_ Definition = def
 		_ Node       = node
 		_ User       = user
-		_ Project    = project
 	)
 	var _ Task = UserTask{}
 
@@ -39,7 +39,6 @@ func TestDeprecatedTypeNamesStillWork(t *testing.T) {
 	if got := task.AssigneeUsername(); got != "" {
 		t.Errorf("AssigneeUsername = %q", got)
 	}
-	_ = project
 }
 
 // Variables went from an alias to a defined type. Go's assignability rule —

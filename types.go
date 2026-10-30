@@ -180,12 +180,54 @@ type Instance struct {
 	// BusinessKey is the caller's name for the case, given with
 	// [WithBusinessKey]. Empty when it was started without one, and always
 	// from a server no newer than Metis v0.5.0.
-	BusinessKey string    `json:"business_key,omitempty"`
-	CreatedAt   time.Time `json:"created_at,omitzero"`
+	BusinessKey string `json:"business_key,omitempty"`
+	// Tokens are where the instance stands: one for each path it is on.
+	// [Client.GetInstance] sends them; listings leave them out.
+	Tokens    []Token   `json:"tokens,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitzero"`
 }
 
 // IsFinished reports whether the instance has stopped for good.
 func (i Instance) IsFinished() bool { return i.Status.IsFinished() }
+
+// WaitingAt reports whether one of the instance's paths stands at step,
+// active — at a receive task or a catch event, that is the instance waiting
+// for what the step catches. It reads [Instance.Tokens], so it is only
+// meaningful on an instance from [Client.GetInstance].
+func (i Instance) WaitingAt(step string) bool {
+	for _, t := range i.Tokens {
+		if t.Step.ID == step && t.Status == TokenActive {
+			return true
+		}
+	}
+	return false
+}
+
+// Token is one place an instance stands — a path through the diagram, and the
+// step it has reached.
+type Token struct {
+	ID string `json:"id"`
+	// Step is where the path stands. The server sends its ID only.
+	Step   StepRef     `json:"node"`
+	Status TokenStatus `json:"status"`
+	// CreatedAt is when the path reached the step.
+	CreatedAt time.Time `json:"created_at,omitzero"`
+}
+
+// TokenStatus is whether a path is moving.
+type TokenStatus string
+
+const (
+	// TokenActive stands at its step: running it, or waiting there.
+	TokenActive TokenStatus = "active"
+	// TokenSuspended was paused with its instance.
+	TokenSuspended TokenStatus = "suspended"
+	// TokenCompleted has finished its path.
+	TokenCompleted TokenStatus = "completed"
+)
+
+// Ref names the instance, to keep or hand on without the rest of it.
+func (i Instance) Ref() InstanceRef { return InstanceRef{ID: i.ID} }
 
 // ProcessInstance is the former name of [Instance].
 //
@@ -275,6 +317,19 @@ func (t UserTask) NodeID() string {
 	return t.Node.ID
 }
 
+// Ref names the task.
+func (t UserTask) Ref() TaskRef { return TaskRef{ID: t.ID} }
+
+// Step names the BPMN element the task was created for, zero when the
+// response carried no node. Step().In(flow) finds it in a [Flow] read from the
+// same definition.
+func (t UserTask) Step() StepRef {
+	if t.Node == nil {
+		return StepRef{}
+	}
+	return StepRef{ID: t.Node.ID, Name: t.Name}
+}
+
 // Task is the former name of [UserTask].
 //
 // Deprecated: use [UserTask]. The package has two kinds of task and the bare
@@ -334,10 +389,10 @@ func (t ExternalTask) NodeID() string {
 type AuditEntry struct {
 	// ID names the entry. Two reads of a trail that overlap carry the same
 	// entry under the same ID.
-	ID        string    `json:"id,omitempty"`
-	Type      string    `json:"type"`
-	NodeID    string    `json:"node_id,omitempty"`
-	NodeName  string    `json:"node_name,omitempty"`
+	ID   string `json:"id,omitempty"`
+	Type string `json:"type"`
+	// Step is where it happened; zero for an entry about the whole instance.
+	Step      StepRef   `json:"-"`
 	Message   string    `json:"message"`
 	Narrative string    `json:"narrative,omitempty"`
 	CreatedAt time.Time `json:"created_at,omitzero"`
@@ -346,14 +401,15 @@ type AuditEntry struct {
 // UnmarshalJSON reads an entry as the server writes it.
 //
 // The server sends the step as a nested node object and the time as
-// "timestamp", so NodeID, NodeName and CreatedAt, read under their own names
-// alone, always came back empty. Both spellings are accepted; the server's wins
-// where both are present.
+// "timestamp"; older answers sent node_id, node_name and created_at. Both
+// spellings are accepted; the nested one wins where both are present.
 func (e *AuditEntry) UnmarshalJSON(data []byte) error {
 	type plain AuditEntry // no methods, so no recursion
 	var wire struct {
 		plain
-		Node *struct {
+		NodeID   string `json:"node_id"`
+		NodeName string `json:"node_name"`
+		Node     *struct {
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		} `json:"node"`
@@ -363,12 +419,13 @@ func (e *AuditEntry) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*e = AuditEntry(wire.plain)
+	e.Step = StepRef{ID: wire.NodeID, Name: wire.NodeName}
 	if wire.Node != nil {
 		if wire.Node.ID != "" {
-			e.NodeID = wire.Node.ID
+			e.Step.ID = wire.Node.ID
 		}
 		if wire.Node.Name != "" {
-			e.NodeName = wire.Node.Name
+			e.Step.Name = wire.Node.Name
 		}
 	}
 	if !wire.Timestamp.IsZero() {
@@ -394,11 +451,6 @@ type Project struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 }
-
-// ProjectRef is the former name of [Project].
-//
-// Deprecated: use [Project]. This alias will be removed in a future release.
-type ProjectRef = Project
 
 // PageOptions selects one window of a listing that has no filters of its own —
 // everything it narrows by is already in the path. Listings that do have
@@ -458,6 +510,18 @@ func (i Incident) NodeID() string {
 		return ""
 	}
 	return i.Node.ID
+}
+
+// Ref names the incident, to resolve it.
+func (i Incident) Ref() IncidentRef { return IncidentRef{ID: i.ID} }
+
+// Step names the BPMN element the incident happened at, zero when the
+// response carried no node.
+func (i Incident) Step() StepRef {
+	if i.Node == nil {
+		return StepRef{}
+	}
+	return StepRef{ID: i.Node.ID, Name: i.Node.Name}
 }
 
 // ExecutionPath is the route an instance actually took — the steps it reached,

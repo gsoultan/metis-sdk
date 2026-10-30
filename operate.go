@@ -2,6 +2,7 @@ package metis
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -90,13 +91,29 @@ type Operation struct {
 	At    time.Time `json:"at"`
 	Actor string    `json:"actor"`
 	// Type is the kind of act, such as "instance_cancelled".
-	Type       string `json:"type"`
-	ProjectID  string `json:"project_id,omitempty"`
-	InstanceID string `json:"instance_id,omitempty"`
-	NodeID     string `json:"node_id,omitempty"`
-	NodeName   string `json:"node_name,omitempty"`
+	Type     string      `json:"type"`
+	Project  ProjectRef  `json:"project_id,omitzero"`
+	Instance InstanceRef `json:"instance_id,omitzero"`
+	// Step is the step acted on; zero for an operation on a whole instance.
+	Step StepRef `json:"-"`
 	// Narrative is the entry in words, for a person.
 	Narrative string `json:"narrative"`
+}
+
+// UnmarshalJSON reads the step from node_id and node_name.
+func (o *Operation) UnmarshalJSON(data []byte) error {
+	type plain Operation
+	var wire struct {
+		plain
+		NodeID   string `json:"node_id"`
+		NodeName string `json:"node_name"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*o = Operation(wire.plain)
+	o.Step = StepRef{ID: wire.NodeID, Name: wire.NodeName}
+	return nil
 }
 
 // ListOperationsOptions filters and pages the audit log. Every field is
@@ -183,12 +200,12 @@ func (c *Client) ListOperations(ctx context.Context, opts ListOperationsOptions)
 // RetentionHold keeps an instance, and the whole case it belongs to, out of
 // the server's retention sweep until it is released.
 type RetentionHold struct {
-	ID         string    `json:"id"`
-	ProjectID  string    `json:"project_id"`
-	InstanceID string    `json:"instance_id"`
-	Reason     string    `json:"reason"`
-	PlacedBy   string    `json:"placed_by"`
-	PlacedAt   time.Time `json:"placed_at"`
+	ID       string      `json:"id"`
+	Project  ProjectRef  `json:"project_id"`
+	Instance InstanceRef `json:"instance_id"`
+	Reason   string      `json:"reason"`
+	PlacedBy string      `json:"placed_by"`
+	PlacedAt time.Time   `json:"placed_at"`
 }
 
 // GetRetentionHold returns the hold on an instance, or nil when it has none.
@@ -249,15 +266,29 @@ func (c *Client) ListRetentionHolds(ctx context.Context, projectID string) ([]Re
 // RetentionPeriod is how long one process's finished instances are kept, or,
 // in a period's history, one change to it.
 type RetentionPeriod struct {
-	ID         string `json:"id"`
-	ProjectID  string `json:"project_id"`
-	ProcessKey string `json:"process_key"`
+	ID      string     `json:"id"`
+	Process ProcessRef `json:"-"`
 	// Days is the period, or nil when the process follows the installation's
 	// setting.
 	Days   *int      `json:"days"`
 	Reason string    `json:"reason"`
 	SetBy  string    `json:"set_by"`
 	SetAt  time.Time `json:"set_at"`
+}
+
+// UnmarshalJSON reads the process from project_id and process_key.
+func (p *RetentionPeriod) UnmarshalJSON(data []byte) error {
+	type plain RetentionPeriod
+	var wire struct {
+		plain
+		processWire
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*p = RetentionPeriod(wire.plain)
+	p.Process = wire.process()
+	return nil
 }
 
 // SetRetentionPeriod gives a process, by key and for every version of it, its

@@ -2,6 +2,7 @@ package metis
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 )
@@ -20,11 +21,28 @@ type DecisionResult struct {
 	// edited. Empty for lines saved without one.
 	MatchedRuleIDs []string `json:"matched_rule_ids,omitempty"`
 
-	// DecisionKey, DecisionName and DecisionVersion say which table, and which
-	// version of it, decided — what an audit record of the decision needs.
-	DecisionKey     string `json:"decision_key,omitempty"`
-	DecisionName    string `json:"decision_name,omitempty"`
-	DecisionVersion int    `json:"decision_version,omitempty"`
+	// Decision is which table, and which version of it, decided — what an
+	// audit record of the decision needs, and what [DecisionRef.Evaluate]
+	// runs again on other inputs.
+	Decision DecisionRef `json:"-"`
+}
+
+// UnmarshalJSON reads the decision from decision_key, decision_name and
+// decision_version; [Client.EvaluateDecision] gives it its project.
+func (r *DecisionResult) UnmarshalJSON(data []byte) error {
+	type plain DecisionResult
+	var wire struct {
+		plain
+		Key     string `json:"decision_key"`
+		Name    string `json:"decision_name"`
+		Version int    `json:"decision_version"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*r = DecisionResult(wire.plain)
+	r.Decision = DecisionRef{Key: wire.Key, Name: wire.Name, Version: wire.Version}
+	return nil
 }
 
 // Matched reports whether any line of the table applied. A table with no
@@ -75,5 +93,6 @@ func (c *Client) EvaluateDecision(ctx context.Context, projectID, key string, va
 	if err := c.do(ctx, http.MethodPost, "/api/v1/decisions/evaluate", req, &out); err != nil {
 		return nil, err
 	}
+	out.Result.Decision.Project = ProjectRef{ID: projectID}
 	return &out.Result, nil
 }

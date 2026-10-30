@@ -22,9 +22,14 @@ type Client struct {
 	baseURL string
 	http    *http.Client
 
+	retry RetryPolicy
+
 	mu    sync.RWMutex
 	token string
 	orgID string
+	// me is who the token signs in, once known: from Login, or read on
+	// first use by CurrentUser. A new token forgets it.
+	me *User
 }
 
 // Option configures a Client.
@@ -89,6 +94,9 @@ type APIError struct {
 	// Message is the server's own explanation, or the response text when the
 	// answer was not the usual JSON — a proxy's error page, say.
 	Message string
+	// RetryAfter is how long the answer asked the caller to wait before trying
+	// again, read from its Retry-After header. Zero when it did not say.
+	RetryAfter time.Duration
 }
 
 func (e *APIError) Error() string {
@@ -146,6 +154,7 @@ func IsServerError(err error) bool {
 func (c *Client) Login(ctx context.Context, username, password string) error {
 	var out struct {
 		Token string `json:"token"`
+		User  *User  `json:"user"`
 	}
 	err := c.do(ctx, http.MethodPost, "/api/v1/login", map[string]string{
 		"username": username,
@@ -160,6 +169,10 @@ func (c *Client) Login(ctx context.Context, username, password string) error {
 
 	c.mu.Lock()
 	c.token = out.Token
+	c.me = nil
+	if out.User != nil && out.User.Username != "" {
+		c.me = out.User
+	}
 	c.mu.Unlock()
 	return nil
 }
@@ -174,14 +187,37 @@ func (c *Client) SetOrganization(organizationID string) {
 }
 
 // do runs one JSON request. in may be nil for no body; out may be nil to
-// discard the response body.
+// discard the response body. A read is sent again as the client's
+// [RetryPolicy] allows; anything else is sent once.
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
-	var body io.Reader
+	var encoded []byte
 	if in != nil {
-		encoded, err := json.Marshal(in)
+		var err error
+		encoded, err = json.Marshal(in)
 		if err != nil {
 			return fmt.Errorf("metis: encode request: %w", err)
 		}
+	}
+
+	attempts := 1
+	if method == http.MethodGet {
+		attempts = max(c.retry.Attempts, 1)
+	}
+	for attempt := 1; ; attempt++ {
+		err := c.send(ctx, method, path, encoded, out)
+		if err == nil || attempt >= attempts || !retryable(ctx, err) {
+			return err
+		}
+		if err := sleep(ctx, c.retry.delay(attempt, err)); err != nil {
+			return err
+		}
+	}
+}
+
+// send runs one attempt of a request. encoded is the JSON body, nil for none.
+func (c *Client) send(ctx context.Context, method, path string, encoded []byte, out any) error {
+	var body io.Reader
+	if encoded != nil {
 		body = bytes.NewReader(encoded)
 	}
 
@@ -190,7 +226,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		return fmt.Errorf("metis: build request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	if in != nil {
+	if encoded != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
@@ -205,7 +241,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("metis: %s %s: %w", method, path, err)
+		return &transportError{err: fmt.Errorf("metis: %s %s: %w", method, path, err)}
 	}
 	defer resp.Body.Close()
 
@@ -214,11 +250,15 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 	// from one that is exactly the cap.
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
-		return fmt.Errorf("metis: read response: %w", err)
+		return &transportError{err: fmt.Errorf("metis: read response: %w", err)}
 	}
 
 	if resp.StatusCode >= 400 {
-		return &APIError{StatusCode: resp.StatusCode, Message: serverMessage(payload)}
+		return &APIError{
+			StatusCode: resp.StatusCode,
+			Message:    serverMessage(payload),
+			RetryAfter: retryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		}
 	}
 	if len(payload) > maxResponseBytes {
 		// A cut-off body decodes as "unexpected end of JSON input", which reads

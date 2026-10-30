@@ -516,7 +516,7 @@ Gateways, events and system steps between two user tasks are passed over.
 Steps inside a sub-process come where it stands, with `SubProcess` and
 `Depth()` saying where. `Assignment` says who a step is for and
 `MultiInstance` how it repeats ("two of three managers approve").
-`flows[0].Step(task.NodeID)` finds where a running task sits in the chain.
+`task.Step().In(flows[0])` finds where a running task sits in the chain.
 `ParseFlow` does the same for a diagram you hold, for any kinds of step.
 
 ### Listing a definition's user task nodes
@@ -772,6 +772,26 @@ func handle(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+`WebhookHandler` does that whole receiver: it verifies, answers a repeat of a
+delivery already handled without handling it again, and routes by event with
+`WebhookHandlers`. An event with no function is accepted and left alone.
+
+```go
+http.Handle("/hooks/metis", metis.WebhookHandler(secret,
+	metis.WebhookHandlers{
+		metis.EventTaskCreated:    notifyAssignee,
+		metis.EventIncidentRaised: pageOnCall,
+	}.Handle,
+	metis.WebhookHandlerOptions{}))
+```
+
+It answers 204 when the function returned nil or the delivery was handled
+before, and 500 when the function failed, so Metis sends it again. A forged or
+stale delivery gets 401, and a repeat that arrives while the first is still
+being handled gets 409. Handled IDs are kept in memory (10,000 by default).
+Behind a load balancer, give it a `DeliveryStore` the receivers share. Either
+way, make the function safe to run twice for one delivery.
+
 A delivery carries no process variables, and an `incident.raised` one names the
 incident without its text; ask the API for either. `SendOutgoingWebhookTest`
 posts a signed sample now and returns the request and the answer, and
@@ -807,6 +827,46 @@ One operation takes up to 10,000 instances and is worked through in the
 background, each exactly as the single-instance retry or cancel; it can be
 stopped with `StopBatchOperation`. Fix the cause before a retry.
 
+After an outage, `RetryFailed` does the preview, the guard and the start in one
+call. It retries the failed step of every instance with an open incident that
+the filter matches, refuses with `ErrTooMany` when more match than
+`MaxInstances` (100 by default), and stops the operation at once if more
+failed between the preview and the start. `WaitForBatch` reads the operation
+until it has finished.
+
+```go
+started, err := client.RetryFailed(ctx, projectID, metis.RetryFailedOptions{
+	Reason:       "the payment provider is back",
+	Filter:       metis.BatchFilter{DefinitionID: payments.ID},
+	MaxInstances: 500,
+})
+if err != nil {
+	return err // errors.Is(err, metis.ErrTooMany): narrow the filter
+}
+done, err := client.WaitForBatch(ctx, started.Operation.ID, 0)
+```
+
+`WatchIncidents` yields each open incident of a project once, as it appears,
+for paging someone. The server has no project-wide incident listing, so each
+look lists the instances needing attention and reads each one's incidents; poll
+accordingly (30 seconds by default). A look that fails in a way that may pass
+is yielded as an error and the watch goes on.
+
+```go
+for incident, err := range client.WatchIncidents(ctx, projectID, metis.WatchOptions{}) {
+	if err != nil {
+		log.Print(err)
+		continue
+	}
+	alert(incident)
+}
+```
+
+`StartMany` starts one instance per request, a few at a time (4 by default, 32
+at most), and returns a result per request in order. A request with a business
+key goes through `StartProcessOnce`, so an import run twice starts each case
+once.
+
 For an administrator, `ListOperations` reads the organization's **audit log** —
 who cancelled, waived, migrated or handed over what, newest first — and the
 retention calls keep an instance from the retention sweep
@@ -829,6 +889,29 @@ on. `ListVersions` shows which is live and how much each still runs;
 `ScheduleVersion` at a set time, and `CancelScheduledVersion` drops a cutover
 not yet reached.
 
+`ReleaseVersion` is a release with a guard in front. It checks that the
+diagram holds the process, runs every saved simulation case on it as a draft,
+and deploys only if they all pass; otherwise `ErrReleaseBlocked` comes back
+with the failures and nothing is deployed. The report names the version
+released, the one that was live before, and the older versions still running
+instances. With `PlanMigrations` it carries, for each of those, a dry-run plan
+of moving their instances across.
+
+```go
+report, err := client.ReleaseVersion(ctx, projectID, "expense", bpmn,
+	metis.ReleaseOptions{RequireCases: true, PlanMigrations: true})
+if errors.Is(err, metis.ErrReleaseBlocked) {
+	for _, r := range report.Failed() {
+		log.Printf("%s: %s", r.Case.Name, strings.Join(r.Misses, "; "))
+	}
+}
+```
+
+`PlanMigration` asks for one such plan on its own: where the work sits, where
+it would land, and what refuses or warns. It never moves anything. Applying a
+migration rewrites running cases and can need acknowledgements and a second
+administrator, so do that in the designer.
+
 For a dashboard or a health check, `ListInstancesPage` returns a page with the
 project-wide counts by status and of instances needing attention, in one
 request. `ListWaiting` says on which steps running work sits, `ListDeadlines`
@@ -837,6 +920,138 @@ call activity to the child instance it started.
 
 `UpdateTask` moves a task's due date, priority or name, with a reason, and
 `ActivateAdHocTask` starts an optional step of an ad-hoc sub-process.
+
+## References between objects
+
+Where one object names another, it holds a reference rather than an ID
+string or a half-filled copy: an operation's `Instance` is an `InstanceRef`,
+a deadline's `Process` a `ProcessRef`, an audit entry's `Step` a `StepRef`.
+A reference carries the ID and loads, or acts on, what it names — only when
+asked:
+
+```go
+for _, op := range page.Operations {
+	instance, err := op.Instance.Get(ctx, client) // one request, now
+	...
+}
+started, err := metis.ProjectRef{ID: projectID}.Process("order").Start(ctx, client, vars)
+incidents, err := started.Incidents(ctx, client)
+err = incidents[0].Ref().Resolve(ctx, client)
+step := task.Step().In(flow) // where a running task sits in the diagram
+```
+
+Each kind is its own type, so an instance ID cannot be passed where a task is
+meant. On the wire a reference is the bare ID, as the server sends it. Calls
+that take an object to act on still take its ID as a string; `ref.ID` is
+always there.
+
+## Waiting, and doing a thing once
+
+The calls in this section are built from the ones above, for the places where
+an integration otherwise writes the same loop every time.
+
+**Wait for an outcome.** `WaitForInstance` reads an instance until
+`WaitOptions.Until` holds (by default, until it finishes) and returns it then.
+`StartAndWait` starts a process and waits, for a short unattended process whose
+result is needed now. Bound both with the context. A failed instance ends the
+wait with `ErrInstanceFailed`; a context that ends first gives a `*WaitError`
+with the instance as last read.
+
+```go
+ctx, cancel := context.WithTimeout(ctx, time.Minute)
+defer cancel()
+done, err := client.StartAndWait(ctx, project, "credit-check", vars, metis.WaitOptions{})
+```
+
+**Send a message when somebody waits for it.** The server drops a message that
+nothing is waiting for, and `SendMessage` still answers success. A reply that
+arrives while the instance is still on the step before is lost that way.
+`SendMessageTo` reads the instance until one of its paths stands at the step
+that catches the message, then sends. If the instance finishes or the context
+ends first, nothing is sent and the error wraps `ErrNoReceiver`.
+
+```go
+err := client.SendMessageTo(ctx, project, "payment-received", orderID, vars,
+	metis.Receiver{Instance: id, WaitingAt: "WaitForPayment"})
+```
+
+`Instance.Tokens` and `Instance.WaitingAt(step)` say where an instance from
+`GetInstance` stands.
+
+**Start a case once.** `StartProcessOnce(project, key, businessKey, vars)`
+returns the instance of that process already started for the business key, a
+finished one included, or starts one. After a start whose answer was lost it
+looks again, so calling it twice for the same order makes one instance. It is
+look-then-start with nothing held in between, so give one case to one caller at
+a time.
+
+**Complete a task once.** `CompleteTaskSafely` reads the task before and after
+completing it. A task the signed-in user already completed answers nil without
+a second completion. One that somebody else holds or completed gives a
+`*TaskConflictError` matching `ErrTaskTakenByOther`, and a withdrawn one
+matches `ErrTaskClosed`. A failure that leaves the task open comes back as it
+was, and the call can be made again. `ClaimAndComplete` claims first when the
+task is not the user's yet, for working an item off a shared queue:
+
+```go
+switch err := client.ClaimAndComplete(ctx, task.ID, vars); {
+case errors.Is(err, metis.ErrTaskTakenByOther):
+	// somebody was quicker: take the next one
+case err != nil:
+	return err
+}
+```
+
+Both need to know who is signed in. `CurrentUser` says, from `Login` or from
+`GET /api/v1/users/me` once.
+
+## Reading a whole listing
+
+Every paged listing has an `All…` form that walks every page as a
+range-over-func loop, asking for the next page only when the loop gets there:
+
+```go
+for task, err := range client.AllTasks(ctx, metis.ListTasksOptions{ProjectID: p}) {
+	if err != nil {
+		return err // the first error ends the walk
+	}
+	fmt.Println(task.Name)
+}
+```
+
+`AllInstances`, `AllTasks`, `AllClaimableTasks`, `AllDefinitions` and
+`AllBatchOperationItems` read numbered pages; `AllOperations` and
+`AllOutgoingWebhookDeliveries` follow the cursor each page hands back. Breaking
+out of the loop stops the reading.
+
+A listing changes while it is read. The numbered ones are newest first, so a
+row added during the walk pushes older rows onto the next page; rows are told
+apart by ID and each is yielded once. A row that leaves the listing pulls the
+others up instead, and the one that moves back onto a page already read is
+missed, so narrow the listing to rows that will stay in it when that matters.
+A server that answers the same rows whatever page is asked for ends the walk
+with `ErrPagingStalled` rather than looping.
+
+## Retrying reads
+
+`WithRetry` sends a read again when it got no answer, or an answer that may
+pass: 429, 500, 502, 503 or 504. Waits double from `Base`, less a random part
+so many clients do not come back together, and a `Retry-After` from the server
+is honoured up to `Max`.
+
+```go
+client := metis.NewClient(url, metis.WithRetry(metis.RetryPolicy{
+	Attempts: 4,                      // in all, the first included
+	Base:     200 * time.Millisecond, // the default
+	Max:      30 * time.Second,       // the default
+}))
+```
+
+Only GET requests are retried. A start, a completion or any other write is sent
+once whatever the policy says: the server has no idempotency key for them, so a
+write whose answer was lost may have happened, and sending it again could do it
+twice. `APIError.RetryAfter` carries the server's `Retry-After` for code that
+retries writes itself after looking first.
 
 ## Errors
 
@@ -888,12 +1103,15 @@ corrected in those releases.
 | Needs Metis v0.5.0+ | Against v0.4.0 and earlier |
 | :-- | :-- |
 | `ResolveTask`, `ListDelegatedTasks` | No such route: an error, `IsNotFound` for `ResolveTask`. |
+| `CurrentUser` with a token from `WithToken`, and so `CompleteTaskSafely` and `ClaimAndComplete` | No such route: `IsNotFound`. After `Login` the user is known without it, against any server. |
 | `ExtendExternalTaskLock`, `WorkerOptions.ExtendLock` | `ExtendExternalTaskLock` answers `IsNotFound`. A worker with `ExtendLock` says so once through `OnError` and keeps to the lock it fetched. |
 | `GetTimelinePage` paging | `Limit` and `Offset` are ignored and the whole trail comes back, with a `Total` of zero. `GetTimeline` works against both. |
 
 | Needs a release newer than Metis v0.5.0 | Against v0.5.0 and earlier |
 | :-- | :-- |
 | `WithBusinessKey` | Ignored: the instance starts without a key. |
+| `ReleaseVersion` | The saved cases cannot be read or run on a draft: an error, `IsNotFound` or `IsInvalid`, and nothing is deployed. |
+| `StartProcessOnce`, and `StartMany` for requests with a business key | The server keeps no business key, so the case cannot be found again. Once the project has any instance the call is refused with `ErrFilterUnsupported`, from the listing it reads first; in an empty project it starts one without the key. |
 | `ListInstancesOptions.BusinessKey` | Refused with `ErrFilterUnsupported`, as for the instance filter above: the server lists every instance, and the SDK will not hand that back as the case's. |
 | `WorkerOptions.Version`, `WithWorkerVersion` | Ignored. |
 | Simulating a draft (`Definition`, `BPMNXML`) or a replay | Refused with a 400 (`IsInvalid`): a replay or a `.bpmn` draft with a message saying it is not supported yet, a `Definition` draft as an unreadable request. `Simulate` and `SimulateBatch` of a deployed version work on both. |

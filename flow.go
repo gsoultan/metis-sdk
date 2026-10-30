@@ -203,7 +203,7 @@ func ParseFlow(bpmnXML []byte, types ...NodeType) ([]*Flow, error) {
 //
 // It is the design: which steps come after which. Where one running instance
 // stands is [Client.ListTasks] with its InstanceID; a task's
-// [UserTask.NodeID] finds its step with [Flow.Step].
+// [UserTask.Step] finds its step with [StepRef.In].
 func (c *Client) ListUserTasksInOrder(ctx context.Context, definitionID string) ([]*Flow, error) {
 	bpmnXML, err := c.ExportDefinition(ctx, definitionID)
 	if err != nil {

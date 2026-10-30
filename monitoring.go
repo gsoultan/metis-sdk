@@ -2,6 +2,7 @@ package metis
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -21,8 +22,8 @@ type InstancePage struct {
 	// incident. The engine leaves such an instance active, so it is not one of
 	// the StatusCounts.
 	NeedsAttention int64
-	// NeedsAttentionIDs are the instances on this page that hold one.
-	NeedsAttentionIDs []string
+	// NeedsAttentionOnPage are the instances on this page that hold one.
+	NeedsAttentionOnPage []InstanceRef
 }
 
 // ListInstancesPage is [Client.ListInstances] with the counts a dashboard or a
@@ -44,8 +45,8 @@ func (c *Client) ListInstancesPage(ctx context.Context, opts ListInstancesOption
 			Status ProcessStatus `json:"status"`
 			Total  int64         `json:"total"`
 		} `json:"status_counts"`
-		NeedsAttentionTotal int64    `json:"needs_attention_total"`
-		NeedsAttentionIDs   []string `json:"needs_attention_ids"`
+		NeedsAttentionTotal int64         `json:"needs_attention_total"`
+		NeedsAttentionIDs   []InstanceRef `json:"needs_attention_ids"`
 	}
 	if err := c.do(ctx, http.MethodGet, "/api/v1/instances?"+query.Encode(), nil, &out); err != nil {
 		return nil, err
@@ -54,11 +55,11 @@ func (c *Client) ListInstancesPage(ctx context.Context, opts ListInstancesOption
 		return nil, err
 	}
 	page := &InstancePage{
-		Instances:         out.Instances,
-		Page:              out.Page,
-		StatusCounts:      make(map[ProcessStatus]int64, len(out.StatusCounts)),
-		NeedsAttention:    out.NeedsAttentionTotal,
-		NeedsAttentionIDs: out.NeedsAttentionIDs,
+		Instances:            out.Instances,
+		Page:                 out.Page,
+		StatusCounts:         make(map[ProcessStatus]int64, len(out.StatusCounts)),
+		NeedsAttention:       out.NeedsAttentionTotal,
+		NeedsAttentionOnPage: out.NeedsAttentionIDs,
 	}
 	for _, count := range out.StatusCounts {
 		page.StatusCounts[count.Status] += count.Total
@@ -85,18 +86,46 @@ func (c *Client) ListSubProcesses(ctx context.Context, parentInstanceID string) 
 
 // WaitingProcess is where one process's running work sits right now.
 type WaitingProcess struct {
-	Key  string `json:"key"`
-	Name string `json:"name"`
+	Process ProcessRef `json:"-"`
+	Name    string     `json:"name"`
 	// Instances counts the running instances sitting on at least one step. One
 	// on two parallel branches is one instance, waiting in two places.
 	Instances int           `json:"instances"`
 	Steps     []WaitingStep `json:"steps"`
 }
 
+// UnmarshalJSON reads the process from key.
+func (w *WaitingProcess) UnmarshalJSON(data []byte) error {
+	type plain WaitingProcess
+	var wire struct {
+		plain
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*w = WaitingProcess(wire.plain)
+	w.Process.Key = wire.Key
+	return nil
+}
+
 // WaitingStep is one step and how much running work sits on it.
 type WaitingStep struct {
-	NodeID  string `json:"node_id"`
-	Waiting int    `json:"waiting"`
+	Step    StepRef `json:"-"`
+	Waiting int     `json:"waiting"`
+}
+
+// UnmarshalJSON reads the step from node_id.
+func (w *WaitingStep) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		NodeID  string `json:"node_id"`
+		Waiting int    `json:"waiting"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*w = WaitingStep{Step: StepRef{ID: wire.NodeID}, Waiting: wire.Waiting}
+	return nil
 }
 
 // ListWaiting says, for each process in the project, on which steps its
@@ -112,6 +141,9 @@ func (c *Client) ListWaiting(ctx context.Context, projectID string) ([]WaitingPr
 	}
 	if err := c.do(ctx, http.MethodGet, "/api/v1/projects/"+url.PathEscape(projectID)+"/waiting", nil, &out); err != nil {
 		return nil, err
+	}
+	for i := range out.Processes {
+		out.Processes[i].Process.Project = ProjectRef{ID: projectID}
 	}
 	return out.Processes, nil
 }
@@ -140,15 +172,32 @@ func (d Deadlines) Overdue(now time.Time) []DeadlineTask {
 
 // DeadlineTask is one open task with a due date, and the process it is part of.
 type DeadlineTask struct {
-	ID          string     `json:"id"`
+	Task        TaskRef    `json:"id"`
 	Name        string     `json:"name"`
-	NodeID      string     `json:"node_id"`
+	Step        StepRef    `json:"-"`
 	Status      TaskStatus `json:"status"`
 	Priority    int        `json:"priority"`
 	Assignee    string     `json:"assignee,omitempty"`
 	DueDate     time.Time  `json:"due_date"`
-	ProcessKey  string     `json:"process_key"`
+	Process     ProcessRef `json:"-"`
 	ProcessName string     `json:"process_name"`
+}
+
+// UnmarshalJSON reads the step and the process from node_id and process_key.
+func (d *DeadlineTask) UnmarshalJSON(data []byte) error {
+	type plain DeadlineTask
+	var wire struct {
+		plain
+		NodeID     string `json:"node_id"`
+		ProcessKey string `json:"process_key"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*d = DeadlineTask(wire.plain)
+	d.Step = StepRef{ID: wire.NodeID, Name: d.Name}
+	d.Process.Key = wire.ProcessKey
+	return nil
 }
 
 // ListDeadlines returns the project's open tasks that have a due date, overdue
@@ -163,6 +212,9 @@ func (c *Client) ListDeadlines(ctx context.Context, projectID string) (*Deadline
 	}
 	if err := c.do(ctx, http.MethodGet, "/api/v1/projects/"+url.PathEscape(projectID)+"/deadlines", nil, &out); err != nil {
 		return nil, err
+	}
+	for i := range out.Deadlines.Tasks {
+		out.Deadlines.Tasks[i].Process.Project = ProjectRef{ID: projectID}
 	}
 	return &out.Deadlines, nil
 }

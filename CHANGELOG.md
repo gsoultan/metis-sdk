@@ -37,6 +37,9 @@ rest does. Nothing that worked against an older server stops working.
 Some additions reach routes the server has had for longer, and say so in
 their entries.
 
+Code written against v0.2.0 needs changes in one place: where a response
+named another object by ID, it now holds a typed reference. See **Changed**.
+
 ### Added
 
 - **Business keys.** `StartProcess` takes `WithBusinessKey("ORDER-4411")`, and
@@ -109,6 +112,47 @@ their entries.
   exported diagram.
 - **`ListClaimableTasks`**: the unclaimed tasks the signed-in user may
   claim, through their own name or their groups. Served since Metis v0.2.0.
+- **Waiting for an outcome.** `WaitForInstance(id, WaitOptions{Until, Poll})`
+  and `StartAndWait`, with `ErrInstanceFailed` and `*WaitError` carrying the
+  instance as last read. `Instance.Tokens` and `Instance.WaitingAt(step)` say
+  where an instance stands.
+- **`SendMessageTo`** sends a message only once the instance is waiting at the
+  step that catches it, and otherwise fails with `ErrNoReceiver` instead of
+  having the server drop it.
+- **Doing a thing once.** `StartProcessOnce` finds the case's instance by
+  business key and process before starting one, and looks again after a lost
+  answer. `CompleteTaskSafely` and `ClaimAndComplete` read the task before
+  and after, answer nil for a task the user already completed, and report
+  somebody else's with a `*TaskConflictError` matching `ErrTaskTakenByOther`
+  or `ErrTaskClosed`. `CurrentUser` says who is signed in, from `Login` or
+  `GET /api/v1/users/me` (v0.5.0).
+- **Guarded releases.** `ReleaseVersion` runs a process's saved simulation
+  cases on the new diagram and deploys only if they pass, refusing with
+  `ErrReleaseBlocked` otherwise. Its `ReleaseReport` names the version
+  released, the one live before, the versions still running instances and,
+  with `PlanMigrations`, a dry-run `MigrationPlan` for each. `PlanMigration`
+  asks for one plan; it never applies. Planning is an administrator's, from
+  v0.3.0.
+- **`WebhookHandler`** is a whole receiver for outgoing webhooks. It verifies
+  each delivery, answers a repeat of one already handled without handling it
+  again (`DeliveryStore`, with `NewMemoryDeliveryStore` for one process), and
+  answers so that Metis retries what failed. `WebhookHandlers` routes by event.
+- **Operating after an outage.** `RetryFailed` previews, refuses more than
+  `MaxInstances` with `ErrTooMany`, and starts one retry batch operation,
+  stopping it at once if it took more than allowed. `WaitForBatch` waits for an
+  operation to finish. `WatchIncidents` yields each open incident of a project
+  once as it appears. `StartMany` starts many instances with bounded
+  concurrency, each case once when it has a business key.
+- **Whole listings.** `AllInstances`, `AllTasks`, `AllClaimableTasks`,
+  `AllDefinitions`, `AllBatchOperationItems`, `AllOperations` and
+  `AllOutgoingWebhookDeliveries` walk every page as an `iter.Seq2`, reading a
+  page only when the loop reaches it. Rows pushed onto the next page by inserts
+  are yielded once; a server that ignores paging ends the walk with
+  `ErrPagingStalled`.
+- **`WithRetry(RetryPolicy{...})`** sends a GET again after a network failure
+  or a 429, 500, 502, 503 or 504, with jittered doubling waits and the
+  server's `Retry-After` honoured up to `Max`. Writes are never retried.
+  `APIError.RetryAfter` carries the header. Off unless set.
 - **Case work.** `UpdateTask` renames a task, sets its priority, and moves or
   removes its due date, with a reason; `ActivateAdHocTask` starts an optional
   step of an ad-hoc sub-process. Served since Metis v0.3.0.
@@ -118,6 +162,29 @@ their entries.
 - **`StartProcess` and `FetchAndLock` take options** (`...StartOption`,
   `...FetchOption`). Every call compiles as before; only code that stores
   either method in a variable of the old function type needs the new one.
+- **References are objects, not ID strings (breaking).** Where one object
+  names another, the field is now a typed reference that holds the ID and
+  loads or acts on what it names: `InstanceRef` (`Get`, `Incidents`,
+  `Tasks`), `TaskRef`, `ProjectRef` (`Get`, `Process`), `ProcessRef`
+  (`Versions`, `Start`), `StepRef` (`In(flow)`), `IncidentRef` (`Resolve`),
+  `WebhookRef`, `DeliveryRef` (`Retry`, `Stop`), `ReleaseRef` (`Cancel`) and
+  `DecisionRef` (`Evaluate`). Each takes only its own kind, so an instance ID
+  cannot go where a task is meant, and none calls the server until asked.
+  On the wire a reference is still the bare ID. Renamed fields:
+  `Operation.ProjectID/InstanceID/NodeID/NodeName` → `Project`, `Instance`,
+  `Step`; `AuditEntry.NodeID/NodeName` → `Step`; `RetentionHold.ProjectID/
+  InstanceID` → `Project`, `Instance`; `RetentionPeriod` and `SimulationCase`
+  `ProjectID` + `ProcessKey` → `Process`; `BatchOperation.ProjectID` →
+  `Project`; `BatchItem.InstanceID` and `SimulationReplay.InstanceID` →
+  `Instance`; `OutgoingWebhook.ProjectID` and `Delivery.ProjectID` →
+  `Project`; `DeliveryInstance.ProcessKey` → `Process`; `WebhookTest.DeliveryID`
+  → `Delivery`; `WebhookDelivery.WebhookID` → `Webhook`; the anonymous
+  `WebhookSimulationResult.Waiting` and `Starts` rows are now
+  `WebhookWaiter` and `WebhookStart`. `Instance`, `UserTask` and `Incident`
+  gain `Ref()`, and `UserTask` and `Incident` gain `Step()`. `GetProject`
+  is new. Filters and arguments still take IDs.
+- **`ProjectRef` is no longer an alias of `Project`.** The deprecated alias
+  gave its name to the project reference above; use `Project` for a project.
 
 ## [0.2.0] — 2026-10-16
 
