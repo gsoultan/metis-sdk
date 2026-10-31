@@ -907,6 +907,31 @@ if errors.Is(err, metis.ErrReleaseBlocked) {
 }
 ```
 
+A promotion moves tested versions from one environment to the next
+unchanged. Make one client per environment, each at that environment's
+address. `CutPromotion` records the live versions of the named processes in
+development, with the decisions they consult. In production,
+`ImportPromotion` stages them: they are stored and checked, but not live.
+`GoLive` then makes them live together, once the decisions pass their tests
+and the processes their saved cases. A protected environment needs
+`ApprovePromotion` first, from someone else. `RollBackPromotion` returns to
+the promotion before. Between installations, `ExportPromotion` returns a
+signed file and `ImportPromotionFile` takes it.
+
+```go
+dev := metis.NewClient("https://metis.example.com", metis.WithToken(designer))
+prod := metis.NewClient("https://metis.example.com:8443", metis.WithToken(releaser))
+if _, err := dev.CutPromotion(ctx, projectID, metis.CutPromotion{
+	Name: "2026.11.1", Processes: []string{"expense"},
+}); err != nil {
+	return err
+}
+if _, err := prod.ImportPromotion(ctx, projectID, "", "2026.11.1"); err != nil {
+	return err
+}
+_, err := prod.GoLive(ctx, projectID, "2026.11.1")
+```
+
 `PlanMigration` asks for one such plan on its own: where the work sits, where
 it would land, and what refuses or warns. It never moves anything. Applying a
 migration rewrites running cases and can need acknowledgements and a second
