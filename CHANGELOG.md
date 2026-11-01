@@ -8,6 +8,12 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **Promotions between environments.** `CutPromotion`, `ImportPromotion`,
+  `ApprovePromotion`, `GoLive`, `RollBackPromotion`, `GetPromotion` and
+  `ListPromotions` move tested process and decision versions from
+  development to production together; `ExportPromotion` and
+  `ImportPromotionFile` carry one between installations as a signed file.
+  Needs a server with the releases routes.
 - **People.** The members of a project's own directory sign in and work their
   tasks through routes of their own, and the client now reaches them.
   `LoginPerson` signs a person in to their project and keeps the token, as
