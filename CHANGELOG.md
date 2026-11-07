@@ -8,6 +8,14 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **`client.Project(id)`.** The calls on one project with its ID given once:
+  `Import`, `Release`, `Start`, `StartOnce`, `StartAndWait`, `SendMessage`,
+  `Broadcast`, `Decide`, `Simulate`, `Versions`, `LiveVersions`, `Promote`,
+  `Schedule`, `CancelSchedule`, `RetryFailed`, `Approvals()`, and `People()`
+  with `List`, `HeldTasks`, `Deactivate`, `Activate` and `Stranded`.
+- **One set of task calls for Users and People.** After `LoginPerson`, or
+  with a person's API key given by the new `WithPersonToken`, `Inbox`,
+  `GetTask`, `ClaimTask`, `UnclaimTask` and `CompleteTask` work as the person.
 - **Approval lines without BPMN.** `c.Approvals(projectID)` defines a line
   as data (`Define`, `Line`) and runs requests on it: `Submit`, `List`, `Get`,
   and `Approve`, `Reject`, `Revise`, `Resubmit` and `Withdraw` on a task. An
@@ -195,6 +203,10 @@ named another object by ID, it now holds a typed reference. See **Changed**.
 
 ### Changed
 
+- **The `…PersonTask` calls are deprecated.** `ListPersonTasks`,
+  `GetPersonTask`, `ClaimPersonTask`, `ReleasePersonTask` and
+  `CompletePersonTask` still work; use `Inbox`, `GetTask`, `ClaimTask`,
+  `UnclaimTask` and `CompleteTask` on a client signed in as the person.
 - **`examples/approvals` uses approval lines.** It no longer ships a BPMN file
   or a decision table: the line is a Go value, defined at seed time, and the
   backend is a third shorter.

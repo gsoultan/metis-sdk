@@ -17,6 +17,9 @@ const maxInboxPages = 20
 // It is the two calls an inbox needs, [Client.ListTasksByAssignee] for the
 // user and [Client.ListClaimableTasks], put together.
 func (c *Client) Inbox(ctx context.Context) ([]UserTask, error) {
+	if c.signedInAsPerson() {
+		return c.personInbox(ctx)
+	}
 	me, err := c.CurrentUser(ctx)
 	if err != nil {
 		return nil, err
@@ -55,5 +58,26 @@ func (c *Client) Inbox(ctx context.Context) ([]UserTask, error) {
 		}
 	}
 	slices.SortStableFunc(out, func(a, b UserTask) int { return a.CreatedAt.Compare(b.CreatedAt) })
+	return out, nil
+}
+
+// personInbox is a person's work, which their own listing already gives as
+// one list.
+func (c *Client) personInbox(ctx context.Context) ([]UserTask, error) {
+	var out []UserTask
+	for page := 1; page <= maxInboxPages; page++ {
+		tasks, info, err := c.ListPersonTasks(ctx, PageOptions{Page: page, PageSize: 100})
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range tasks {
+			if t.IsOpen() {
+				out = append(out, t)
+			}
+		}
+		if info == nil || !info.HasMore {
+			break
+		}
+	}
 	return out, nil
 }

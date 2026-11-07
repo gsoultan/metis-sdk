@@ -91,14 +91,20 @@ func main() {
 		log.Fatal(err)
 	}
 
-	id, err := client.StartProcess(ctx, projects[0].ID, "invoice-approval",
-		metis.Variables{"amount": 900})
+	// Project gives the project's ID once for every call on it.
+	p := client.Project(projects[0].ID)
+	id, err := p.Start(ctx, "invoice-approval", metis.Variables{"amount": 900})
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println("started instance", id)
 }
 ```
+
+`client.Project(id)` has the project's calls: `Import`, `Release`, `Start`,
+`Decide`, `Versions`, `Promote`, `Schedule`, `SendMessage`, `Approvals()` and
+`People()`. The same calls are on the `Client` with the project ID as an
+argument, for code that already uses them.
 
 `NewClient` takes the server's base URL; the `/api/v1` prefix is added for you.
 A `Client` is safe for concurrent use, and every request is bounded by a 30s
@@ -577,17 +583,21 @@ overflow cannot be recovered. Both are pinned by tests.
 People are the members of a project's own directory: the employees, customers
 or suppliers a process hands work to, as opposed to the Users who run Metis. A
 person signs in to one project and sees only the tasks the process gives them.
-Their token works the People calls and nothing else, so use a client of its own:
+Their token works the People calls and nothing else, so use a client of its own.
+Once it is signed in as a person, the task calls are the same ones a User makes:
 
 ```go
 person := metis.NewClient(baseURL)
 session, err := person.LoginPerson(ctx, projectID, "ana", password)
 
-tasks, page, err := person.ListPersonTasks(ctx, metis.PageOptions{PageSize: 20})
-err = person.ClaimPersonTask(ctx, taskID)
-err = person.CompletePersonTask(ctx, taskID, metis.Variables{"signed": true})
-err = person.ReleasePersonTask(ctx, taskID)                 // give it back
+tasks, err := person.Inbox(ctx)
+err = person.ClaimTask(ctx, taskID)
+err = person.CompleteTask(ctx, taskID, metis.Variables{"signed": true})
+err = person.UnclaimTask(ctx, taskID)                       // give it back
 ```
+
+(`ListPersonTasks`, `ClaimPersonTask`, `CompletePersonTask`, `GetPersonTask` and
+`ReleasePersonTask` still work, and are deprecated.)
 
 **A person's own system** works their tasks with one of their API keys. They make
 it once, signed in, and the token is shown that one time:
@@ -595,8 +605,8 @@ it once, signed in, and the token is shown that one time:
 ```go
 key, token, err := person.CreatePersonAPIKey(ctx, "payroll export")
 // store token where the payroll system can read it; then, over there:
-payroll := metis.NewClient(baseURL, metis.WithToken(token))
-tasks, _, err := payroll.ListPersonTasks(ctx, metis.PageOptions{})
+payroll := metis.NewClient(baseURL, metis.WithPersonToken(token))
+tasks, err := payroll.Inbox(ctx)
 ```
 
 A key works tasks and nothing more: making, listing and revoking keys
