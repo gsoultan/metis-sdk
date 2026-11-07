@@ -1109,6 +1109,14 @@ METIS_PROJECT="Default Project" \
 go run ./examples/quickstart
 ```
 
+[`examples/approvals`](examples/approvals) is the same journey as a web app:
+a Go backend on this SDK and a React UI for a four-step expense approval
+(submit, supervisor, unit head, finance), showing each request's approval
+line with its Submit, Approve, Revise and Reject actions. Its process uses
+every kind of task metis runs: a script task, a service task calling an API,
+a business rule task, user tasks and a worker. `examples/approvals/run.sh`
+starts it.
+
 ## Server compatibility
 
 The SDK talks to any Metis server; a few calls need **v0.3.0 or later**, and a
