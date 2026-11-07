@@ -17,6 +17,7 @@
 #
 #   ./examples/approvals/run.sh seed     set up only
 #   ./examples/approvals/run.sh serve    start only, after an earlier seed
+#   ./examples/approvals/run.sh change   Budi leaves: change the line, move his requests to Tono
 #   ./examples/approvals/run.sh dev      the Go backend plus Vite with hot
 #                                        reload on http://localhost:5180
 #
@@ -169,5 +170,6 @@ case "${1:-all}" in
   seed)  check_metis; seed ;;
   serve) check_metis; [[ -f "$WEB/dist/index.html" ]] || build_ui; serve ;;
   dev)   check_metis; dev ;;
-  *)     die "unknown command $1: use seed, serve or dev, or nothing for all three" ;;
+  change) check_metis; (cd "$ROOT" && go run ./examples/approvals change) ;;
+  *)     die "unknown command $1: use seed, serve, dev or change, or nothing for all three" ;;
 esac

@@ -30,6 +30,15 @@ var expenseLine = metis.ApprovalLine{
 
 const lineKey = "expense"
 
+// changedLine is expenseLine after Budi leaves: the supervisor step is Tono's,
+// by name, and the rest is unchanged. change.go deploys it.
+var changedLine = func() metis.ApprovalLine {
+	line := expenseLine
+	line.Steps = append([]metis.ApprovalStep(nil), expenseLine.Steps...)
+	line.Steps[0] = metis.ApprovalStep{ID: "supervisor", Name: "Supervisor approval", Users: []string{"tono"}}
+	return line
+}()
+
 // The approval line is what the UI draws across the top of a request: the
 // start, the three approvals and the end, each marked with where the request
 // stands and what can be done there now.
@@ -80,7 +89,12 @@ func approvalLine(req *metis.ApprovalRequest) []lineStep {
 		}
 		switch s.Status {
 		case metis.StepWaiting:
-			approver := approverIn(s.Groups)
+			// Who the open task is offered to, which after a move is the
+			// new line's approver, not the old one's.
+			approver := approverIn(s.Users, s.Groups)
+			if len(s.Waiting.Users)+len(s.Waiting.Groups) > 0 {
+				approver = approverIn(s.Waiting.Users, s.Waiting.Groups)
+			}
 			step.State, step.Who = stateNow, "Waiting for "+approver.Name+" ("+approver.Role+")"
 			step.Actions, step.Actor, step.TaskID = []string{"approve", "reject", "revise"}, approver.Username, s.Waiting.TaskID
 		case metis.StepApproved:
@@ -93,7 +107,7 @@ func approvalLine(req *metis.ApprovalRequest) []lineStep {
 			if req.Done() {
 				step.State = stateSkipped
 			} else {
-				approver := approverIn(s.Groups)
+				approver := approverIn(s.Users, s.Groups)
 				step.State, step.Who = stateLater, approver.Name+" ("+approver.Role+")"
 			}
 		}
@@ -142,8 +156,14 @@ func displayName(username string) string {
 	return username
 }
 
-// approverIn is the sample person in the first of a step's groups.
-func approverIn(groups []string) person {
+// approverIn is the sample person a step is offered to: the first named,
+// or else the first in one of its groups.
+func approverIn(users, groups []string) person {
+	for _, u := range users {
+		if p, ok := personNamed(u); ok {
+			return p
+		}
+	}
 	for _, p := range people {
 		for _, g := range groups {
 			if p.Group == g {

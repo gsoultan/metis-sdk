@@ -9,6 +9,7 @@
 //
 //	go run ./examples/approvals seed     # once: people, groups, the approval line
 //	go run ./examples/approvals          # the web app on http://localhost:8090
+//	go run ./examples/approvals change   # Budi leaves: the line changes, and his requests move to Tono
 //
 // run.sh does both, and builds the UI first. README.md has the details.
 package main
@@ -72,8 +73,10 @@ func main() {
 		err = seed(ctx, cfg)
 	case "serve":
 		err = serve(ctx, cfg)
+	case "change":
+		err = change(ctx, cfg)
 	default:
-		err = fmt.Errorf("unknown command %q: use seed or serve", command)
+		err = fmt.Errorf("unknown command %q: use seed, serve or change", command)
 	}
 	if err != nil {
 		log.Fatal("approvals: ", err)

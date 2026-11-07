@@ -8,6 +8,13 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **Moving requests to a changed approval line.** `Approvals.Behind` lists
+  the open requests still on a line's older versions, with who each waits on
+  and the migration preview. `Approvals.Move` moves all of them or the ones
+  chosen to the live version, where a moved step goes to the new line's
+  approvers. A request metis cannot move safely is named in `Left`, with why.
+  An administrator's. Needs a metis server with
+  `GET /api/v1/projects/{id}/approval-lines/{key}/behind`.
 - **`client.Project(id)`.** The calls on one project with its ID given once:
   `Import`, `Release`, `Start`, `StartOnce`, `StartAndWait`, `SendMessage`,
   `Broadcast`, `Decide`, `Simulate`, `Versions`, `LiveVersions`, `Promote`,
@@ -203,6 +210,9 @@ named another object by ID, it now holds a typed reference. See **Changed**.
 
 ### Changed
 
+- **`examples/approvals` has a line-change scenario.** `run.sh change`
+  gives the supervisor step to Tono, as when Budi leaves, and moves the
+  requests waiting for Budi to him, keeping the rest on their line.
 - **The `…PersonTask` calls are deprecated.** `ListPersonTasks`,
   `GetPersonTask`, `ClaimPersonTask`, `ReleasePersonTask` and
   `CompletePersonTask` still work; use `Inbox`, `GetTask`, `ClaimTask`,

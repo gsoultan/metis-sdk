@@ -108,3 +108,32 @@ func TestInboxPutsMineAndOfferedTogether(t *testing.T) {
 		t.Fatalf("inbox %+v", got)
 	}
 }
+
+func TestBehindAndMove(t *testing.T) {
+	f, client := newFakeServer(t)
+	f.respond("GET /api/v1/projects/p-1/approval-lines/expense/behind", 200, `{"takeover":{"key":"expense","live_version":2,"behind":[
+		{"version":1,"definition_id":"d-1","requests":[{"instance_id":"r-1","version":1}],"plan":{"source_version":1,"target_version":2,"instances":1}}]}}`)
+	f.respond("POST /api/v1/projects/p-1/approval-lines/expense/move", 200, `{"result":{"moved":1,"left":[{"instance_id":"r-2","why":"its step is gone"}]}}`)
+
+	a := client.Approvals("p-1")
+	change, err := a.Behind(t.Context(), "expense")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if change.LiveVersion != 2 || len(change.Behind) != 1 || change.Behind[0].Requests[0].ID != "r-1" || change.Behind[0].Plan.Instances != 1 || !change.Behind[0].Plan.CanApply() {
+		t.Errorf("behind = %+v", change)
+	}
+	res, err := a.Move(t.Context(), "expense", "r-1", "r-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Moved != 1 || len(res.Left) != 1 || res.Left[0].RequestID != "r-2" {
+		t.Errorf("move = %+v", res)
+	}
+	if ids, _ := f.last().Body["requests"].([]any); len(ids) != 2 {
+		t.Errorf("move sent %v", f.last().Body)
+	}
+	if _, err := a.Move(t.Context(), "expense"); err == nil {
+		t.Error("a move of nothing was sent")
+	}
+}

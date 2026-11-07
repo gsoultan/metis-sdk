@@ -51,7 +51,8 @@ func seed(ctx context.Context, cfg config) error {
 	if err != nil && !metis.IsNotFound(err) {
 		return fmt.Errorf("read the approval line: %w", err)
 	}
-	if current != nil && sameLine(*current, expenseLine) {
+	// After change.go has run, the changed line is the sample's too.
+	if current != nil && (sameLine(*current, expenseLine) || sameLine(*current, changedLine)) {
 		log.Printf("✓ approval line %s is up to date (version %d)", lineKey, current.Version)
 		return nil
 	}

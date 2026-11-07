@@ -49,7 +49,7 @@ version they were submitted on.
 
 ## The people
 
-`seed` creates four metis accounts with the password `sample-password`
+`seed` creates five metis accounts with the password `sample-password`
 (`APPROVALS_PEOPLE_PASSWORD` changes it), with `EnsureAccount`. The **Acting
 as** picker in the UI switches between them. Each has their own SDK client,
 signed in as them, so metis itself decides who may act: Dewi cannot approve
@@ -61,6 +61,7 @@ the supervisor's step, and the server says so.
 | Budi | supervisors | supervisor approval |
 | Sari | unit-heads | unit head approval |
 | Dewi | finance | finance approval |
+| Tono | | supervisor once Budi leaves (see below) |
 
 ## Running it
 
@@ -107,6 +108,39 @@ http://localhost:5180. The settings are at the top of `run.sh`.
 4. Switch to **Rina**, press **Revise and resubmit**, change the amount and
    resubmit. The request starts over at the supervisor, round 2.
 5. Approve as Budi, Sari and Dewi. The line ends at *Completed*.
+
+## When the line changes: Budi leaves
+
+Requests already running keep the line they were submitted on. That is
+what you want most of the time, but not when the person a request waits for
+is gone. With the app running, in another terminal:
+
+1. As Rina, submit two requests. Approve the second one as Budi, so it moves
+   on to Sari.
+2. Run `./examples/approvals/run.sh change`. It deploys a new version of the
+   line where the supervisor step is Tono's, then lists the requests still on
+   older versions with `Approvals.Behind`, and decides one by one:
+
+   ```
+   ✓ line changed: version 2 gives the supervisor step to Tono
+     version 1: "Taxi to client" waits for the supervisor → move it to Tono
+     version 1: "Hotel Bandung" is at Unit head approval → keep it on its line
+   ✓ moved 1 request(s) to version 2: Tono now has them
+   ```
+
+3. Reload the first request. Its supervisor step now waits for **Tono**.
+   Budi is refused if he tries, and Tono can approve. The second request stays
+   on version 1 and goes on to Sari and Dewi as before.
+
+The move is `Approvals.Move`, which uses metis's instance migration, so the
+same safety rules apply. A request is left where it is, with the reason, if
+its step is gone from the new line or moving it would skip an approval. New
+requests always follow the newest line.
+
+`change.go` is the whole scenario. In metis, a person in a project's People
+can also be deactivated (`client.Project(id).People().Deactivate`), handing
+their open tasks to someone else. That is the other way to settle a leaver's
+work when the line itself stays the same.
 
 ## How it is built
 

@@ -239,6 +239,65 @@ func (a Approvals) List(ctx context.Context, key, submittedBy string) ([]Approva
 	return out.Requests, err
 }
 
+// LineChange is what is still running on a line's older versions once a
+// newer one is live.
+type LineChange struct {
+	Key         string          `json:"key"`
+	LiveVersion int             `json:"live_version"`
+	Behind      []OlderRequests `json:"behind"`
+}
+
+// OlderRequests is one older version's open requests, and what moving them
+// onto the live version would do.
+type OlderRequests struct {
+	Version      int               `json:"version"`
+	DefinitionID string            `json:"definition_id"`
+	Requests     []ApprovalRequest `json:"requests"`
+	Plan         MigrationPlan     `json:"plan"`
+}
+
+// MoveResult is what a move did.
+type MoveResult struct {
+	Moved int        `json:"moved"`
+	Left  []LeftOver `json:"left,omitempty"`
+}
+
+// LeftOver is a request a move left on its version, and why.
+type LeftOver struct {
+	RequestID string `json:"instance_id"`
+	Why       string `json:"why"`
+}
+
+// Behind lists the open requests still on a line's older versions. A new
+// version never moves a running request by itself: each keeps the line it
+// was submitted on until [Approvals.Move] moves it. An administrator's.
+func (a Approvals) Behind(ctx context.Context, key string) (*LineChange, error) {
+	if a.project == "" || key == "" {
+		return nil, errors.New("metis: Behind needs a project ID and a key")
+	}
+	var out struct {
+		Takeover *LineChange `json:"takeover"`
+	}
+	err := a.c.do(ctx, http.MethodGet, "/api/v1/projects/"+url.PathEscape(a.project)+"/approval-lines/"+url.PathEscape(key)+"/behind", nil, &out)
+	return out.Takeover, err
+}
+
+// Move moves open requests onto the line's live version. Each moved
+// request's open step goes to the new line's approvers. A request the move
+// cannot take (its step is gone, or the move would skip an approval) stays
+// where it is and is named in Left. An administrator's.
+func (a Approvals) Move(ctx context.Context, key string, requestIDs ...string) (*MoveResult, error) {
+	if a.project == "" || key == "" || len(requestIDs) == 0 {
+		return nil, errors.New("metis: Move needs a project ID, a key and the requests to move")
+	}
+	var out struct {
+		Result *MoveResult `json:"result"`
+	}
+	err := a.c.do(ctx, http.MethodPost, "/api/v1/projects/"+url.PathEscape(a.project)+"/approval-lines/"+url.PathEscape(key)+"/move",
+		map[string]any{"requests": requestIDs}, &out)
+	return out.Result, err
+}
+
 // Get says where a request is.
 func (a Approvals) Get(ctx context.Context, requestID string) (*ApprovalRequest, error) {
 	if requestID == "" {

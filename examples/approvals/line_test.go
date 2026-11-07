@@ -88,3 +88,16 @@ func TestHistory(t *testing.T) {
 		t.Errorf("history %+v", got)
 	}
 }
+
+// A request moved to a changed line waits for whoever its open task is
+// offered to now, not for who the step was offered to on the old line.
+func TestAMovedRequestWaitsForTheNewApprover(t *testing.T) {
+	req := metis.ApprovalRequest{Status: metis.RequestInProgress, SubmittedBy: "rina", Round: 1, Steps: []metis.StepState{
+		{ID: "supervisor", Name: "Supervisor approval", Status: metis.StepWaiting, Users: []string{"tono"},
+			Waiting: &metis.Waiting{TaskID: "t-1", Users: []string{"tono"}}},
+	}}
+	line := approvalLine(&req)
+	if got := line[1]; got.Actor != "tono" || got.Who != "Waiting for Tono (next supervisor)" {
+		t.Errorf("step = %+v, want it waiting for Tono", got)
+	}
+}

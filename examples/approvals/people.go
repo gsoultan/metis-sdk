@@ -1,6 +1,6 @@
 package main
 
-// person is one of the sample's four people. Each is a real metis user, made
+// person is one of the sample's people. Each is a real metis user, made
 // by seed, in the group its approval step is offered to.
 type person struct {
 	Username string `json:"username"`
@@ -17,6 +17,8 @@ var people = []person{
 	{Username: "budi", Name: "Budi", Role: "supervisor", Group: "supervisors"},
 	{Username: "sari", Name: "Sari", Role: "unit head", Group: "unit-heads"},
 	{Username: "dewi", Name: "Dewi", Role: "finance", Group: "finance"},
+	// Tono takes over as supervisor when Budi leaves: see change.go.
+	{Username: "tono", Name: "Tono", Role: "next supervisor"},
 }
 
 func personNamed(username string) (person, bool) {
