@@ -3,13 +3,13 @@
 // web/) that shows each request's approval line.
 //
 // The flow is: someone submits a request, a supervisor approves it, then a
-// unit head, then finance, and it is paid and completed. On the way it passes
-// one of each kind of task metis runs — a script task, a service task that
-// calls an API, a business rule task, user tasks, and a service task a worker
-// serves. process.bpmn is the whole definition.
+// unit head, then finance. Any of them can reject it or send it back to be
+// revised and resubmitted. The whole process is expenseLine in line.go: a
+// metis approval line, a list of approvers written as data, with no BPMN.
 //
-//	go run ./examples/approvals seed     # once: people, groups, decision, process
+//	go run ./examples/approvals seed     # once: people, groups, the approval line
 //	go run ./examples/approvals          # the web app on http://localhost:8090
+//	go run ./examples/approvals change   # Budi leaves: the line changes, and his requests move to Tono
 //
 // run.sh does both, and builds the UI first. README.md has the details.
 package main
@@ -21,7 +21,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 )
 
@@ -39,9 +38,6 @@ type config struct {
 	PeoplePassword string
 	// Addr is where this app listens.
 	Addr string
-	// PublicURL is this app's address as metis reaches it. The budget check
-	// is a call from metis to this app, so metis has to be able to reach it.
-	PublicURL string
 	// WebDir holds the built React app.
 	WebDir string
 }
@@ -54,7 +50,6 @@ func loadConfig() config {
 		Project:        os.Getenv("METIS_PROJECT"),
 		PeoplePassword: cmp.Or(os.Getenv("APPROVALS_PEOPLE_PASSWORD"), "sample-password"),
 		Addr:           cmp.Or(os.Getenv("APPROVALS_ADDR"), ":8090"),
-		PublicURL:      strings.TrimRight(cmp.Or(os.Getenv("APPROVALS_PUBLIC_URL"), "http://localhost:8090"), "/"),
 		WebDir:         cmp.Or(os.Getenv("APPROVALS_WEB_DIR"), "examples/approvals/web/dist"),
 	}
 }
@@ -78,8 +73,10 @@ func main() {
 		err = seed(ctx, cfg)
 	case "serve":
 		err = serve(ctx, cfg)
+	case "change":
+		err = change(ctx, cfg)
 	default:
-		err = fmt.Errorf("unknown command %q: use seed or serve", command)
+		err = fmt.Errorf("unknown command %q: use seed, serve or change", command)
 	}
 	if err != nil {
 		log.Fatal("approvals: ", err)
