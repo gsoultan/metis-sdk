@@ -2,8 +2,8 @@
 
 A small web app that runs an expense approval on metis. The backend is Go and
 talks to metis **only through metis-sdk**; the UI is React. It shows the
-**approval line** of each request, the start and the three approvals, with
-the buttons of each step on the step itself:
+**approval line** of each request, with the buttons of each step on the step
+itself:
 
 ```
 Submitted  →  Supervisor approval  →  Unit head approval  →  Finance approval  →  Completed
@@ -11,32 +11,49 @@ Submitted  →  Supervisor approval  →  Unit head approval  →  Finance appro
 ```
 
 *Revise* sends the request back to the requester, whose start step offers
-*Revise and resubmit*; the request then goes through the checks again and
-starts over at the supervisor. *Reject* ends it.
+*Revise and resubmit*; it then starts over at the supervisor. *Reject* ends
+it. Rejecting and sending back need a comment.
 
-## Every kind of task metis runs
+## The whole process is data
 
-The approval line shows the steps people do. Between them, metis does the
-rest, and `process.bpmn` has one of each kind of task:
+There is no BPMN here. The process is a metis **approval line**, the list of
+approvers in `line.go`:
 
-| Step | Kind | What it does |
-| :-- | :-- | :-- |
-| Submitted | start event | Rina's form starts the process (`StartProcess`) |
-| Check the form | **script task** | JavaScript works out `needsReceipt` and `checkedAt` |
-| Check the budget | **service task that calls an API** | metis POSTs the request to this app's `/api/budget/check`; the reply's `budgetOk` and `budgetLeft` become variables. A budget that cannot cover it ends the request |
-| Classify the request | **business rule task** | the `expense-classify` decision table (`decision.json`) sets `riskLevel` and `paymentMethod` |
-| Supervisor, unit head, finance approval | **user tasks** | offered to a group each; the person claims and completes it as themselves (`ClaimAndComplete`) |
-| Revise the request | **user task** | offered back to the requester when an approver chooses *Revise* |
-| Pay out | **service task served by a worker** | this app's `metis.Worker` on topic `expense-pay-out` stands in for the payment system |
-| (after each approval) | exclusive gateway | approve, revise or reject |
+```go
+var expenseLine = metis.ApprovalLine{
+	Key: "expense", Name: "Expense approval", AllowRevise: true,
+	Steps: []metis.ApprovalStep{
+		{ID: "supervisor", Name: "Supervisor approval", Groups: []string{"supervisors"}},
+		{ID: "unit-head", Name: "Unit head approval", Groups: []string{"unit-heads"}},
+		{ID: "finance", Name: "Finance approval", Groups: []string{"finance"}},
+	},
+	Fields: []metis.ApprovalField{{ID: "amount", Label: "Amount", Type: "number"} /* … */},
+}
+```
+
+and running it is five calls:
+
+```go
+approvals := client.Approvals(projectID)
+approvals.Define(ctx, expenseLine)                         // seed: deploy it
+req, _ := approvals.Submit(ctx, "expense", vars)           // as the requester
+approvals.Approve(ctx, req.Waiting().Waiting.TaskID, "")   // as the approver (or Reject, Revise)
+approvals.Resubmit(ctx, revision.TaskID, corrected)        // as the requester, after a Revise
+req, _ = approvals.Get(ctx, req.ID)                        // where it is: each step, who decided
+```
+
+metis generates the process, keeps every decision on the request's trail, and
+says where each request is and who it waits on. Changing `expenseLine` and
+running `seed` again deploys a new version. Requests already running keep the
+version they were submitted on.
 
 ## The people
 
-`seed` creates four metis users with the password `sample-password`
-(`APPROVALS_PEOPLE_PASSWORD` changes it). The **Acting as** picker in the UI
-switches between them. Each has their own SDK client, signed in as them, so
-metis itself decides who may act: Dewi cannot approve the supervisor's step,
-and the server says so.
+`seed` creates four metis accounts with the password `sample-password`
+(`APPROVALS_PEOPLE_PASSWORD` changes it), with `EnsureAccount`. The **Acting
+as** picker in the UI switches between them. Each has their own SDK client,
+signed in as them, so metis itself decides who may act: Dewi cannot approve
+the supervisor's step, and the server says so.
 
 | Person | Group | Does |
 | :-- | :-- | :-- |
@@ -59,22 +76,20 @@ When no metis is running, the script starts one for you. It uses the metis
 checkout next to this repository (`../metis`) or clones it into
 `~/.cache/metis-approvals`. Its `scripts/dev.sh` runs PostgreSQL in an Apple
 container (macOS on Apple silicon; `brew install container`), and the script
-sets metis up with the administrator `admin` / `metis-admin`. That metis also
-allows the budget check's call to localhost. The script then builds the UI,
-creates the sample's people, groups, decision table and process (safe to run
+sets metis up with the administrator `admin` / `metis-admin`. The script then
+builds the UI, creates the sample's people and approval line (safe to run
 again), and serves the app.
 
 You need Go, bun or npm, and git. The first run takes a few minutes, because
 metis and its UI are built once. PostgreSQL keeps running afterwards:
 `container stop metis-dev-pg` stops it.
 
-The metis has to include
-[gsoultan/metis#231](https://github.com/gsoultan/metis/pull/231) (merged):
-BPMN import keeping a service task's address, a business rule task's decision
-and a user task's form. `run.sh` starts metis's `main`, which has it.
+The metis needs approval lines, which are in
+[gsoultan/metis#232](https://github.com/gsoultan/metis/pull/232). Until that
+is merged, start its branch:
+`METIS_REF=claude/project-thread-xb7u13 ./examples/approvals/run.sh`.
 
-To use a metis you already run, start it with
-`METIS_HTTP_ALLOW_PRIVATE_NETWORKS=true` and pass its administrator:
+To use a metis you already run, pass its administrator:
 `METIS_PASSWORD=... ./examples/approvals/run.sh`.
 
 `run.sh seed`, `run.sh serve` and `run.sh dev` do one part each, against a
@@ -83,31 +98,24 @@ http://localhost:5180. The settings are at the top of `run.sh`.
 
 ## A walk through
 
-1. As **Rina**, open *New request*, fill it in and press **Submit** on the
-   line. The request page opens; the checks run in a second and the
-   supervisor's step turns current.
+1. As **Rina**, open *New request*, fill it in and press **Submit**. The
+   request page opens with the supervisor's step current.
 2. Switch to **Budi**. The supervisor step shows a comment box and
    **Approve**, **Revise**, **Reject**. Approve.
 3. Switch to **Sari** and press **Revise** with a comment. The line marks her
    step *Sent back* and Rina's start step current.
 4. Switch to **Rina**, press **Revise and resubmit**, change the amount and
-   resubmit. Every approval is pending again.
-5. Approve as Budi, Sari and Dewi. The payment worker pays it, and the line
-   ends at *Completed* with the payment reference.
-
-Try a request over Rp 5.000.000 on *CC-330 Operations* to see the budget
-check stop one, and *Reject* to see a rejection.
+   resubmit. The request starts over at the supervisor, round 2.
+5. Approve as Budi, Sari and Dewi. The line ends at *Completed*.
 
 ## How it is built
 
 | File | What is in it |
 | :-- | :-- |
-| `process.bpmn` | the process, deployed with `ImportDefinition` |
-| `decision.json` | the decision table |
+| `line.go` | the approval line, and how a request is drawn from what metis says about it |
+| `seed.go` | setting metis up: `EnsureAccount` for each person, `Approvals.Define` for the line |
+| `app.go` | the backend's API for the UI |
 | `main.go` | settings and the `seed` / `serve` commands |
-| `seed.go` | setting metis up. The process goes through the SDK; users, groups and the decision table are administration the SDK does not cover, so those few calls use the REST API directly |
-| `app.go` | the backend's API for the UI, the budget API and the payment worker |
-| `line.go` | the approval line, worked out from the instance and its open tasks |
 | `web/` | the React app (Vite + TypeScript) |
 
 The Go backend serves the built UI from `web/dist` on disk rather than
@@ -121,13 +129,12 @@ The backend's own API, which the UI calls:
 | Route | Does |
 | :-- | :-- |
 | `GET /api/people` | the four people |
-| `GET /api/requests?as=` | requests, the requester's own when `as` is given |
-| `POST /api/requests` | submit (`StartProcess` as the requester) |
-| `GET /api/requests/{id}` | a request with its approval line and history (`GetInstance`, `ListTasks`, `GetTimeline`) |
-| `GET /api/inbox?as=` | what waits for that person (`ListClaimableTasks`, `ListTasksByAssignee`) |
-| `POST /api/tasks/{id}/decision` | approve, revise or reject (`ClaimAndComplete` as the approver) |
-| `POST /api/tasks/{id}/resubmit` | resubmit after revising (`ClaimAndComplete` as the requester) |
-| `POST /api/budget/check` | the budget API metis calls |
+| `GET /api/requests?as=` | requests, the requester's own when `as` is given (`Approvals.List`) |
+| `POST /api/requests` | submit (`Approvals.Submit` as the requester) |
+| `GET /api/requests/{id}` | a request with its approval line and history (`Approvals.Get`) |
+| `GET /api/inbox?as=` | what waits for that person (`Inbox`) |
+| `POST /api/tasks/{id}/decision` | approve, revise or reject (`Approvals.Decide` as the approver) |
+| `POST /api/tasks/{id}/resubmit` | resubmit after revising (`Approvals.Resubmit` as the requester) |
 
 This is a sample: the backend holds each person's session and trusts the
 *Acting as* picker, which a real app would replace with its own sign-in.

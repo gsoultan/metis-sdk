@@ -225,7 +225,7 @@ function StepActions({
       <textarea
         id={`c-${step.id}`}
         rows={2}
-        placeholder="Comment (optional)"
+        placeholder="Comment (needed to reject or send back)"
         value={comment}
         onChange={(e) => setComment(e.target.value)}
       />

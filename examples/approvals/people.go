@@ -27,12 +27,3 @@ func personNamed(username string) (person, bool) {
 	}
 	return person{}, false
 }
-
-// approvals maps each approval step to the variable prefix it records its
-// answer under — supervisorDecision, supervisorComment, supervisorBy — which is
-// what the gateway after it reads.
-var approvals = map[string]string{
-	"supervisor-approval": "supervisor",
-	"unit-head-approval":  "unitHead",
-	"finance-approval":    "finance",
-}

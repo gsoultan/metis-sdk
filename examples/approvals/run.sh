@@ -9,7 +9,7 @@
 # and runs its scripts/dev.sh, which starts PostgreSQL in an Apple container
 # (https://github.com/apple/container), and sets it up with the administrator
 # admin / metis-admin. Then it builds the React UI, sets metis up for the sample
-# (people, groups, the decision table and the process; safe to repeat), and
+# (people, groups and the approval line; safe to repeat), and
 # opens the app on http://localhost:8090. Ctrl-C stops the app and the metis
 # it started. PostgreSQL keeps running; `container stop metis-dev-pg` stops it.
 #
@@ -29,11 +29,6 @@
 #   METIS_PROJECT              the project to use         (the first one)
 #   APPROVALS_PEOPLE_PASSWORD  the sample people's        (sample-password)
 #   APPROVALS_ADDR             where the app listens      (:8090)
-#   APPROVALS_PUBLIC_URL       the app as metis reaches it (http://localhost:8090)
-#
-# metis calls this app for the budget check, a call to localhost. The metis
-# this script starts allows that; one you run yourself needs
-# METIS_HTTP_ALLOW_PRIVATE_NETWORKS=true.
 
 set -Eeuo pipefail
 
@@ -151,7 +146,7 @@ seed() {
 }
 
 serve() {
-  info "Open ${APPROVALS_PUBLIC_URL:-http://localhost:8090}  (Ctrl-C stops it)"
+  info "Open http://localhost:8090  (Ctrl-C stops it)"
   if [[ -n "$METIS_PID" ]]; then
     # Not exec: this shell stays to stop the metis it started.
     (cd "$ROOT" && go run ./examples/approvals serve) || true

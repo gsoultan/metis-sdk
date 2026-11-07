@@ -8,6 +8,18 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **Approval lines without BPMN.** `c.Approvals(projectID)` defines a line
+  as data (`Define`, `Line`) and runs requests on it: `Submit`, `List`, `Get`,
+  and `Approve`, `Reject`, `Revise`, `Resubmit` and `Withdraw` on a task. An
+  `ApprovalRequest` says each step's state, who it waits on (`Waiting()`) and
+  the whole trail. `UserTask.ApprovalStep()` names the step a task is. Needs a
+  metis server with `POST /api/v1/projects/{id}/approval-lines`.
+- **One inbox.** `Inbox` returns the open tasks the signed-in user holds or
+  may take, without duplicates, oldest first.
+- **Users and groups.** `ListOrganizations`, `ListAccounts`, `ListGroups`,
+  `CreateAccount`, `CreateGroup` and `AddToGroup`, plus `EnsureAccount` and
+  `EnsureGroup`, which create only what is missing, so a seed can run twice.
+
 - **Deactivating and reactivating people.** `SetParticipantActive` stops a
   person of a project signing in and getting work, and settles the tasks they
   hold: handed to one account (`HeldWorkHandOver`), put back on offer
@@ -183,6 +195,9 @@ named another object by ID, it now holds a typed reference. See **Changed**.
 
 ### Changed
 
+- **`examples/approvals` uses approval lines.** It no longer ships a BPMN file
+  or a decision table: the line is a Go value, defined at seed time, and the
+  backend is a third shorter.
 - **`StartProcess` and `FetchAndLock` take options** (`...StartOption`,
   `...FetchOption`). Every call compiles as before; only code that stores
   either method in a variable of the old function type needs the new one.
