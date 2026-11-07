@@ -69,10 +69,9 @@ metis and its UI are built once. PostgreSQL keeps running afterwards:
 `container stop metis-dev-pg` stops it.
 
 The metis has to include
-[gsoultan/metis#231](https://github.com/gsoultan/metis/pull/231): BPMN import
-keeping a service task's address, a business rule task's decision and a user
-task's form. Until that is merged, start the PR's branch:
-`METIS_REF=claude/project-thread-xb7u13 ./examples/approvals/run.sh`.
+[gsoultan/metis#231](https://github.com/gsoultan/metis/pull/231) (merged):
+BPMN import keeping a service task's address, a business rule task's decision
+and a user task's form. `run.sh` starts metis's `main`, which has it.
 
 To use a metis you already run, start it with
 `METIS_HTTP_ALLOW_PRIVATE_NETWORKS=true` and pass its administrator:
