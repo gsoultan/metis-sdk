@@ -92,6 +92,10 @@ func findProject(ctx context.Context, client *metis.Client, name string) (string
 			return p.ID, nil
 		}
 	}
+	// No name asked for: a fresh metis has one project, made at its setup.
+	if name == "" && len(projects) > 0 {
+		return projects[0].ID, nil
+	}
 	return "", fmt.Errorf("no project named %q; set METIS_PROJECT to one of the %d there are", name, len(projects))
 }
 

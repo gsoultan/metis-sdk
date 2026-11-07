@@ -47,44 +47,40 @@ and the server says so.
 
 ## Running it
 
-You need Go, bun or npm, and a running metis that includes
-[gsoultan/metis#231](https://github.com/gsoultan/metis/pull/231): BPMN import
-keeping a service task's address, a business rule task's decision and a user
-task's form. Without it the budget check calls nothing, the decision step
-fails and approvals cannot record their decision.
-
-1. Start metis so it may call this app on localhost. metis refuses calls to
-   private addresses by default (SSRF protection), and the budget check is
-   one. In the metis repository:
-
-   ```bash
-   METIS_HTTP_ALLOW_PRIVATE_NETWORKS=true ./scripts/dev.sh backend
-   ```
-
-   That serves metis on `http://localhost:8273`. Finish its setup wizard once
-   and note the administrator password.
-
-2. In this repository:
-
-   ```bash
-   METIS_PASSWORD='the-admin-password' ./examples/approvals/run.sh
-   ```
-
-   It builds the UI, sets metis up (`seed`: the groups, the people, the
-   decision table and the process; safe to run again), and serves the app on
-   **http://localhost:8090**.
-
-`run.sh seed`, `run.sh serve` and `run.sh dev` do one part each; `dev` runs
-the UI with hot reload on http://localhost:5180. The settings are at the top
-of `run.sh`.
-
-Without the script:
+One command, from this repository:
 
 ```bash
-(cd examples/approvals/web && npm install && npm run build)
-METIS_PASSWORD=... go run ./examples/approvals seed
-METIS_PASSWORD=... APPROVALS_WEB_DIR=examples/approvals/web/dist go run ./examples/approvals
+./examples/approvals/run.sh
 ```
+
+Then open **http://localhost:8090**. Ctrl-C stops it.
+
+When no metis is running, the script starts one for you. It uses the metis
+checkout next to this repository (`../metis`) or clones it into
+`~/.cache/metis-approvals`. Its `scripts/dev.sh` runs PostgreSQL in an Apple
+container (macOS on Apple silicon; `brew install container`), and the script
+sets metis up with the administrator `admin` / `metis-admin`. That metis also
+allows the budget check's call to localhost. The script then builds the UI,
+creates the sample's people, groups, decision table and process (safe to run
+again), and serves the app.
+
+You need Go, bun or npm, and git. The first run takes a few minutes, because
+metis and its UI are built once. PostgreSQL keeps running afterwards:
+`container stop metis-dev-pg` stops it.
+
+The metis has to include
+[gsoultan/metis#231](https://github.com/gsoultan/metis/pull/231): BPMN import
+keeping a service task's address, a business rule task's decision and a user
+task's form. Until that is merged, start the PR's branch:
+`METIS_REF=claude/project-thread-xb7u13 ./examples/approvals/run.sh`.
+
+To use a metis you already run, start it with
+`METIS_HTTP_ALLOW_PRIVATE_NETWORKS=true` and pass its administrator:
+`METIS_PASSWORD=... ./examples/approvals/run.sh`.
+
+`run.sh seed`, `run.sh serve` and `run.sh dev` do one part each, against a
+metis that is running; `dev` runs the UI with hot reload on
+http://localhost:5180. The settings are at the top of `run.sh`.
 
 ## A walk through
 

@@ -51,7 +51,7 @@ func loadConfig() config {
 		MetisURL:       cmp.Or(os.Getenv("METIS_URL"), "http://localhost:8273"),
 		AdminUser:      cmp.Or(os.Getenv("METIS_USERNAME"), "admin"),
 		AdminPassword:  os.Getenv("METIS_PASSWORD"),
-		Project:        cmp.Or(os.Getenv("METIS_PROJECT"), "Default Project"),
+		Project:        os.Getenv("METIS_PROJECT"),
 		PeoplePassword: cmp.Or(os.Getenv("APPROVALS_PEOPLE_PASSWORD"), "sample-password"),
 		Addr:           cmp.Or(os.Getenv("APPROVALS_ADDR"), ":8090"),
 		PublicURL:      strings.TrimRight(cmp.Or(os.Getenv("APPROVALS_PUBLIC_URL"), "http://localhost:8090"), "/"),
