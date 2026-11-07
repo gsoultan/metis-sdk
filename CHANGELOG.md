@@ -8,6 +8,12 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **A web sample, `examples/approvals`.** An expense approval with a Go
+  backend that uses only this SDK and a React UI showing each request's
+  approval line, with Submit, Approve, Revise and Reject on the steps
+  themselves. Its process has one of each kind of task metis runs. Needs a
+  metis server whose BPMN import keeps service task addresses, decision
+  references and task forms.
 - **Promotions between environments.** `CutPromotion`, `ImportPromotion`,
   `ApprovePromotion`, `GoLive`, `RollBackPromotion`, `GetPromotion` and
   `ListPromotions` move tested process and decision versions from
