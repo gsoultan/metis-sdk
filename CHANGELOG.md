@@ -8,6 +8,24 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **Deactivating and reactivating people.** `SetParticipantActive` stops a
+  person of a project signing in and getting work, and settles the tasks they
+  hold: handed to one account (`HeldWorkHandOver`), put back on offer
+  (`HeldWorkRelease`) or kept (`HeldWorkKeep`, then listed by
+  `ListStrandedTasks`). Reactivating moves nothing back. `ListHeldTasks` lists
+  what a person holds and `ListParticipants` lists a project's People. Needs a
+  metis server with `PUT /api/v1/participants/{id}/active`.
+- **Tasks nobody can act on.** `ListStrandedTasks` lists a project's open
+  tasks whose holder left or was deactivated, or that are offered only to
+  people and groups with nobody left who can take them, with why each name
+  cannot act. Hand one over with `AssignTask`. Needs a metis server with
+  `GET /api/v1/participants/stranded-tasks`.
+- **A web sample, `examples/approvals`.** An expense approval with a Go
+  backend that uses only this SDK and a React UI showing each request's
+  approval line, with Submit, Approve, Revise and Reject on the steps
+  themselves. Its process has one of each kind of task metis runs. Needs a
+  metis server whose BPMN import keeps service task addresses, decision
+  references and task forms.
 - **Promotions between environments.** `CutPromotion`, `ImportPromotion`,
   `ApprovePromotion`, `GoLive`, `RollBackPromotion`, `GetPromotion` and
   `ListPromotions` move tested process and decision versions from
