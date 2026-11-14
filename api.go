@@ -932,6 +932,13 @@ func handOverBody(fields map[string]any, opts []HandOverOption) map[string]any {
 // METIS_ALLOW_UNDECLARED_TASK_VARIABLES=true keeps the older rule for a
 // migration window.)
 //
+// From the **metis release after v0.7.4** a completion must also answer every
+// required field of the task's form: one that leaves a required field out,
+// null or empty is refused with a 400 ([IsInvalid]) naming the fields, and the
+// task stays open. false and 0 are answers. A field the form can hide is not
+// asked for. Before, a completion with no variables finished an approval
+// without anybody saying yes or no.
+//
 // As with [Client.ClaimTask], the acting user is the client's token. Completing
 // a task somebody else holds is refused by the server.
 func (c *Client) CompleteTask(ctx context.Context, taskID string, variables Variables) error {

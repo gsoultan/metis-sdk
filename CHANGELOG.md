@@ -51,6 +51,16 @@ while the major version is 0 the API may still move.
 All of it needs a Metis server newer than v0.5.0 with People sign-in switched
 on (`METIS_PEOPLE_TOKEN_KEY`).
 
+### Changed
+
+- **A completion must answer the form's required fields.** From the metis
+  release after v0.7.4, `CompleteTask`, `CompleteTaskSafely` and
+  `ClaimAndComplete` are refused with a 400 (`IsInvalid`) when the variables
+  leave a required field of the task's form out, null or empty. The error
+  names the fields and the task stays open. `false` and `0` count as answers.
+  Code that completes an approval with `nil` variables now has to send the
+  decision.
+
 ## [0.3.0] — 2026-10-23
 
 Brings the client up to what Metis has gained since v0.5.0. Everything here
