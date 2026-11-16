@@ -62,17 +62,37 @@ const maxResponseBytes = 8 << 20
 // caller's goroutine forever, and integrations inherit the outage.
 const defaultTimeout = 30 * time.Second
 
-// NewClient builds a client for the server at baseURL, e.g.
-// "https://bpm.example.com". The /api/v1 prefix is added by the client.
+// NewClient builds a client for the Metis at baseURL, e.g.
+// "https://bpm.example.com".
+//
+// baseURL is either metis-server's address, the one people open the web app
+// on, or the engine's own API address. Both answer the same API: every call
+// this client makes is under /api/v1, which metis-server forwards to the
+// engine unchanged, Authorization and X-Organization-ID included.
+//
+// The /api/v1 prefix is added by the client. A baseURL that already ends in
+// /api/v1, as an API address copied from elsewhere often does, is read as the
+// address in front of it rather than doubled.
 func NewClient(baseURL string, opts ...Option) *Client {
 	c := &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
+		baseURL: trimBaseURL(baseURL),
 		http:    &http.Client{Timeout: defaultTimeout},
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
 	return c
+}
+
+// apiPrefix is where the whole API lives, on the engine and on metis-server.
+const apiPrefix = "/api/v1"
+
+// trimBaseURL drops trailing slashes and a trailing /api/v1, so both
+// "https://bpm.example.com/" and "https://bpm.example.com/api/v1" name the
+// same Metis and no request goes to /api/v1/api/v1.
+func trimBaseURL(baseURL string) string {
+	trimmed := strings.TrimRight(baseURL, "/")
+	return strings.TrimRight(strings.TrimSuffix(trimmed, apiPrefix), "/")
 }
 
 // APIError is a non-2xx answer from the server, carrying the HTTP status and

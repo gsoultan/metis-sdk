@@ -6,6 +6,23 @@ while the major version is 0 the API may still move.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A base address ending in `/api/v1` works.** `NewClient("https://bpm.example.com/api/v1")`
+  used to send every call to `/api/v1/api/v1/…` and get a 404. That is the
+  address the web app's SDK page put in its Go snippets; the trailing `/api/v1`
+  is now dropped.
+
+### Documentation
+
+- **Where to point the client.** The README says which of the engine
+  ([gsoultan/metis](https://github.com/gsoultan/metis)) and the web app in
+  front of it ([gsoultan/metis-server](https://github.com/gsoultan/metis-server))
+  the client can use, and what is the engine's alone: webhook deliveries, and
+  `METIS_TRUSTED_PROXIES` for callers that come through metis-server.
+- `examples/approvals/run.sh` no longer builds a UI inside the metis checkout,
+  which has none since the web app moved to metis-server.
+
 ### Added
 
 - **Deactivating and reactivating people.** `SetParticipantActive` stops a

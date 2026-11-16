@@ -97,6 +97,7 @@
 //
 // # A first program
 //
+//	// metis-server's address, or the engine's: both answer /api/v1.
 //	client := metis.NewClient("http://localhost:8080")
 //	if err := client.Login(ctx, "admin", "secret"); err != nil {
 //		return err

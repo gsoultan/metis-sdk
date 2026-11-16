@@ -65,7 +65,8 @@ creates the sample's people, groups, decision table and process (safe to run
 again), and serves the app.
 
 You need Go, bun or npm, and git. The first run takes a few minutes, because
-metis and its UI are built once. PostgreSQL keeps running afterwards:
+metis is built once. The sample needs the engine only, not
+[metis-server](https://github.com/gsoultan/metis-server)'s web app. PostgreSQL keeps running afterwards:
 `container stop metis-dev-pg` stops it.
 
 The metis has to include

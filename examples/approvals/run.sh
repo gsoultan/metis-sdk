@@ -53,7 +53,7 @@ info() { printf '\033[34m→\033[0m %s\n' "$*"; }
 
 command -v go >/dev/null || die "Go is required: https://go.dev/dl/"
 
-# bun if it is there, as the metis UI uses it; npm otherwise.
+# bun if it is there, as metis-server's UI uses it; npm otherwise.
 js() {
   if command -v bun >/dev/null; then bun "$@"; elif command -v npm >/dev/null; then npm "$@"; else die "bun or npm is required to build the UI"; fi
 }
@@ -98,11 +98,8 @@ start_metis() {
   local dir log="$CACHE/metis.log"
   dir="$(metis_dir)"
   mkdir -p "$CACHE"
-  # metis embeds its own UI, so it does not compile until that is built once.
-  if [[ ! -f "$dir/ui/dist/index.html" ]]; then
-    info "Building the metis UI once (a minute or two)"
-    (cd "$dir/ui" && js install >/dev/null && js run build >/dev/null) || die "could not build the metis UI in $dir/ui"
-  fi
+  # metis is the engine only; its web app is gsoultan/metis-server, which this
+  # sample does not need. dev.sh backend builds and runs the engine alone.
   info "Starting metis and PostgreSQL (log: $log)"
   # Chosen here so the setup below can use it; dev.sh keeps a token it is given.
   export METIS_SETUP_TOKEN="${METIS_SETUP_TOKEN:-$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
