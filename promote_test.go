@@ -76,3 +76,38 @@ func TestACutPromotionNeedsAName(t *testing.T) {
 		t.Fatal("a promotion with no name was cut")
 	}
 }
+
+func TestAPromotionShowsWhatItPassedWhereItWasCut(t *testing.T) {
+	f, c := newFakeServer(t)
+	ctx := context.Background()
+	f.respond("GET /api/v1/projects/p1/releases/r1", 200,
+		`{"release":{"name":"r1","state":"cut","checked":{"at":"2026-11-17T09:00:00Z","decision_tests":3,"simulation_cases":2}}}`)
+	f.respond("GET /api/v1/projects/p1/releases/r0", 200, `{"release":{"name":"r0","state":"live"}}`)
+
+	got, err := c.GetPromotion(ctx, "p1", "r1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Checked == nil || got.Checked.DecisionTests != 3 || got.Checked.SimulationCases != 2 || got.Checked.At.IsZero() {
+		t.Fatalf("checks read as %+v", got.Checked)
+	}
+
+	older, err := c.GetPromotion(ctx, "p1", "r0")
+	if err != nil {
+		t.Fatalf("get an older promotion: %v", err)
+	}
+	if older.Checked != nil {
+		t.Fatalf("a promotion cut before checks reads checks %+v", older.Checked)
+	}
+}
+
+func TestACutWhoseChecksFailIsRefusedAsInvalid(t *testing.T) {
+	f, c := newFakeServer(t)
+	f.respond("POST /api/v1/projects/p1/releases", 400,
+		`{"error":"release r1 is not cut: 1 check(s) failed: process claims: case \"big claim\" did not end where it should"}`)
+
+	_, err := c.CutPromotion(context.Background(), "p1", CutPromotion{Name: "r1", Processes: []string{"claims"}})
+	if !IsInvalid(err) {
+		t.Fatalf("a refused cut is %v, not invalid", err)
+	}
+}

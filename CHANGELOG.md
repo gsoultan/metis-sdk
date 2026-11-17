@@ -6,6 +6,15 @@ while the major version is 0 the API may still move.
 
 ## [Unreleased]
 
+### Changed
+
+- **A promotion is checked where it is cut.** `CutPromotion` is refused, as
+  `IsInvalid`, when a carried decision fails its own tests or a carried
+  process fails a saved simulation case on the server it is cut on. What
+  passed is on `Promotion.Checked` (`At`, `DecisionTests`, `SimulationCases`).
+  It is nil for a promotion cut by an engine before
+  [gsoultan/metis#266](https://github.com/gsoultan/metis/pull/266).
+
 ### Fixed
 
 - **A base address ending in `/api/v1` works.** `NewClient("https://bpm.example.com/api/v1")`

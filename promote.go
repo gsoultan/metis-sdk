@@ -39,6 +39,19 @@ type Promotion struct {
 	LiveAt      *time.Time      `json:"live_at,omitempty"`
 	Previous    string          `json:"previous,omitempty"`
 	CreatedAt   time.Time       `json:"created_at"`
+	// Checked is what the promotion passed where it was cut. Nil for one cut
+	// by a server that did not check promotions at the cut.
+	Checked *PromotionChecks `json:"checked,omitempty"`
+}
+
+// PromotionChecks is what a promotion passed where it was cut: its
+// decisions' own tests and its processes' saved simulation cases. It is part
+// of the signed content, so an environment that trusts the signature knows
+// the promotion was checked where it was made.
+type PromotionChecks struct {
+	At              time.Time `json:"at"`
+	DecisionTests   int       `json:"decision_tests"`
+	SimulationCases int       `json:"simulation_cases"`
 }
 
 // PromotionItem is one model of a promotion.
@@ -78,7 +91,10 @@ func (c *Client) promotion(ctx context.Context, method, path string, body any) (
 }
 
 // CutPromotion records the live versions of the named models in the
-// environment the client points at. Nothing that runs changes.
+// environment the client points at. Nothing that runs changes. The server
+// first runs the decisions' own tests and the processes' saved simulation
+// cases there, and refuses the cut, listing what failed, if any fail: that
+// refusal is [IsInvalid].
 func (c *Client) CutPromotion(ctx context.Context, projectID string, req CutPromotion) (*Promotion, error) {
 	if req.Name == "" {
 		return nil, errors.New("metis: cut promotion: a name is needed")
