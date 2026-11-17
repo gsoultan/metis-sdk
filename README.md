@@ -930,6 +930,20 @@ on. `ListVersions` shows which is live and how much each still runs;
 `ScheduleVersion` at a set time, and `CancelScheduledVersion` drops a cutover
 not yet reached.
 
+A process whose start step has a schedule starts by itself. `GetStartSchedule`
+says when the next run is due and whether the schedule is paused;
+`PauseStartSchedule` stops the scheduled starts and `ResumeStartSchedule`
+lets them carry on from the next scheduled time, with nothing started for the
+times that passed in between:
+
+```go
+status, err := client.GetStartSchedule(ctx, projectID, "nightly-report")
+if err == nil && status.NextRunAt != nil {
+	fmt.Println("next run at", status.NextRunAt.Local())
+}
+_, err = client.PauseStartSchedule(ctx, projectID, "nightly-report") // over a maintenance window
+```
+
 `ReleaseVersion` is a release with a guard in front. It checks that the
 diagram holds the process, runs every saved simulation case on it as a draft,
 and deploys only if they all pass; otherwise `ErrReleaseBlocked` comes back
