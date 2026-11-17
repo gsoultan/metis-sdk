@@ -54,6 +54,12 @@ func newFakeServer(t *testing.T) (*fakeServer, *Client) {
 			_ = json.Unmarshal(raw, &record.Body)
 			r.Body = io.NopCloser(bytes.NewReader(raw))
 		}
+		// metis-server forwards only /api/ (and /healthz, /readyz) to the
+		// engine and answers everything else with the web app. A call outside
+		// /api/v1 would work against the engine and break behind metis-server.
+		if !strings.HasPrefix(r.URL.Path, apiPrefix+"/") {
+			t.Errorf("%s %s is outside %s, which metis-server does not forward to the engine", r.Method, r.URL.Path, apiPrefix)
+		}
 		f.mu.Lock()
 		f.requests = append(f.requests, record)
 		f.mu.Unlock()
@@ -280,5 +286,42 @@ func TestNilHTTPClientKeepsTheDefault(t *testing.T) {
 	// Used to store the nil and panic on the first request.
 	if _, err := NewClient(server.URL, WithHTTPClient(nil)).ListProjects(t.Context()); err != nil {
 		t.Fatalf("ListProjects = %v", err)
+	}
+}
+
+// An API address copied with its /api/v1, as the web app's SDK page once
+// printed it, used to send every call to /api/v1/api/v1 and get a 404.
+func TestBaseURLWithTheAPIPrefixIsNotDoubled(t *testing.T) {
+	var got []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.URL.Path)
+		_, _ = w.Write([]byte(`{"projects":[]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	for _, base := range []string{
+		server.URL,
+		server.URL + "/",
+		server.URL + "/api/v1",
+		server.URL + "/api/v1/",
+	} {
+		if _, err := NewClient(base).ListProjects(t.Context()); err != nil {
+			t.Fatalf("NewClient(%q).ListProjects = %v", base, err)
+		}
+	}
+	for i, path := range got {
+		if path != "/api/v1/projects" {
+			t.Errorf("request %d went to %q, want /api/v1/projects", i, path)
+		}
+	}
+}
+
+func TestBaseURLKeepsAPathInFrontOfTheAPI(t *testing.T) {
+	// A Metis published under a path of its own keeps that path.
+	if got := trimBaseURL("https://example.com/metis/api/v1"); got != "https://example.com/metis" {
+		t.Errorf("trimBaseURL = %q, want https://example.com/metis", got)
+	}
+	if got := trimBaseURL("https://example.com/metis/"); got != "https://example.com/metis" {
+		t.Errorf("trimBaseURL = %q, want https://example.com/metis", got)
 	}
 }

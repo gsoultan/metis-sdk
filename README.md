@@ -1,7 +1,9 @@
 # Metis Go SDK
 
-The Go client for a [Metis](https://github.com/gsoultan/metis) server — the
-BPMN 2.0 workflow engine.
+The Go client for [Metis](https://github.com/gsoultan/metis), the BPMN 2.0
+workflow engine. It works against the engine directly or through
+[metis-server](https://github.com/gsoultan/metis-server), the web app in front
+of it — see [Where to point the client](#where-to-point-the-client).
 
 ```bash
 go get github.com/gsoultan/metis-sdk
@@ -119,6 +121,35 @@ client := metis.NewClient(baseURL, metis.WithToken(os.Getenv("METIS_TOKEN")))
 `WithHTTPClient` replaces the underlying `*http.Client` for custom TLS, proxies,
 or instrumentation. Accounts belonging to more than one organization pick one
 with `client.SetOrganization(orgID)`.
+
+## Where to point the client
+
+Metis is two programs, and the client works with either:
+
+| Repository | What it serves | Point `NewClient` at it when… |
+| :-- | :-- | :-- |
+| [gsoultan/metis](https://github.com/gsoultan/metis) | The engine: the API under `/api/v1`, `/healthz`, `/readyz`, and gRPC when switched on. No pages. | your program runs next to the engine, on the same network. |
+| [gsoultan/metis-server](https://github.com/gsoultan/metis-server) | The web app, and the engine's `/api/`, `/healthz` and `/readyz` forwarded unchanged. | the address people open Metis on is the one you can reach. |
+
+Every call this client makes is under `/api/v1`, so it does the same thing at
+either address: metis-server forwards the request with its `Authorization` and
+`X-Organization-ID` headers and the engine answers it. The engine does all
+authentication and authorization, so a token works the same way at both. Give
+the base address only; a trailing `/api/v1` is dropped rather than doubled.
+
+Two things are the engine's alone:
+
+- **Webhook deliveries come from the engine**, not from metis-server. The
+  receiving address you register (see [Webhooks](#webhooks)) has to be one the
+  engine can reach.
+- **Behind metis-server, the engine sees your address only if it trusts
+  metis-server**: its `METIS_TRUSTED_PROXIES` must include metis-server's
+  address. Otherwise every caller through metis-server shares one address in
+  the engine's rate limiter and audit log, and one busy program can use up the
+  rate limit for everybody using the web app.
+
+When the engine cannot be reached, metis-server answers 502, which
+[`IsServerError`](#errors) treats as worth retrying.
 
 ## Variables
 
@@ -1177,7 +1208,7 @@ that and fetches a default page, but still returns the right one.
 
 ## Compatibility
 
-Requires **Go 1.27 or later**, matching the [Metis server](https://github.com/gsoultan/metis)
+Requires **Go 1.27 or later**, matching the [Metis engine](https://github.com/gsoultan/metis)
 so both build on one toolchain.
 
 The code itself needs only Go 1.24 — the `omitzero` struct tags, and
@@ -1188,7 +1219,7 @@ compiles unchanged.
 `Variables.As[T]()` is a generic method, which needs Go 1.27 specifically. It is
 the one declaration that would have to change if that floor ever came down.
 
-This module was extracted from the server repository, where it lived at
+This module was extracted from the engine's repository, where it lived at
 `github.com/gsoultan/metis/sdk`. See [CHANGELOG.md](CHANGELOG.md) for what
 changed in the move, including the renamed types and the corrected
 claim/complete signatures.
