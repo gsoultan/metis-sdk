@@ -58,6 +58,16 @@ func WithToken(token string) Option {
 	return func(c *Client) { c.token = token; c.person = false }
 }
 
+// WithAPIKey uses an organization's integration API key, the "mik_…" an
+// administrator of the organization made for the system this client runs in.
+// The client then acts in that organization alone, with the key's roles, and
+// is never asked for a code from an authenticator app: the way for a program
+// that runs unattended to call a Metis that requires one of staff. The key
+// cannot manage accounts or keys; sign in as an administrator for that.
+func WithAPIKey(key string) Option {
+	return func(c *Client) { c.token = key; c.person = false }
+}
+
 // WithPersonToken uses a person's API key (see [Client.CreatePersonAPIKey]).
 // The task calls, [Client.Inbox], [Client.GetTask], [Client.ClaimTask],
 // [Client.UnclaimTask] and [Client.CompleteTask], then work as that person,

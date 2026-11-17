@@ -68,3 +68,16 @@ func TestLoginWithAWrongCodeIsUnauthorized(t *testing.T) {
 		t.Fatalf("err = %v, want IsUnauthorized", err)
 	}
 }
+
+func TestAnIntegrationKeyIsSentAsTheBearer(t *testing.T) {
+	f, client := newFakeServer(t)
+	WithAPIKey("mik_abc")(client)
+	f.respond("GET /api/v1/tasks", 200, `{"tasks":[]}`)
+
+	if _, _, err := client.ListTasks(t.Context(), ListTasksOptions{}); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if got := f.last().Auth; got != "Bearer mik_abc" {
+		t.Errorf("Authorization = %q, want the integration key", got)
+	}
+}

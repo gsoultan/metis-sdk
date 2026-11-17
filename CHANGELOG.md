@@ -25,6 +25,10 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **`WithAPIKey` for an organization's integration API key.** A program
+  that runs unattended calls Metis with the `mik_…` key an administrator made
+  for it, acting in that organization with the key's roles, and is never
+  asked for a code. Needs a metis server with `/api/v1/integration-keys`.
 - **Signing in where the server asks for a code.** Against a Metis that
   requires staff to use an authenticator app, `Login` with a correct password
   answers a `*SecondFactorError` (it matches `ErrSecondFactorRequired`) and

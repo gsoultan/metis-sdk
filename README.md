@@ -136,8 +136,15 @@ if errors.As(err, &sf) && sf.Step == metis.SecondFactorCode {
 A recovery code works in place of the app's code, once. If `Step` is
 `metis.SecondFactorEnrol`, the account has no app yet; it sets one up by
 signing in to the web app. A program that runs unattended should not sign in
-with a person's password at all: give it an API key with `WithToken`, which is
-never asked for a code.
+with a person's password at all: give it its organization's integration API
+key, which is never asked for a code:
+
+```go
+client := metis.NewClient(baseURL, metis.WithAPIKey(os.Getenv("METIS_API_KEY")))
+```
+
+An administrator of the organization makes the key (`mik_…`) in Metis. The
+client then acts in that organization alone, with the roles the key was given.
 
 `WithHTTPClient` replaces the underlying `*http.Client` for custom TLS, proxies,
 or instrumentation. Accounts belonging to more than one organization pick one
