@@ -118,6 +118,27 @@ If the token comes from a secret store rather than a password, skip `Login`:
 client := metis.NewClient(baseURL, metis.WithToken(os.Getenv("METIS_TOKEN")))
 ```
 
+### Servers that ask for a code
+
+A server that asks staff for a code from an authenticator app answers
+`Login` with a `*metis.SecondFactorError` instead of a session. The error
+matches `metis.ErrSecondFactorRequired`. Its `Challenge` and the code the app
+shows finish the sign-in:
+
+```go
+err := client.Login(ctx, username, password)
+var sf *metis.SecondFactorError
+if errors.As(err, &sf) && sf.Step == metis.SecondFactorCode {
+	err = client.LoginWithCode(ctx, sf.Challenge, codeFromTheApp)
+}
+```
+
+A recovery code works in place of the app's code, once. If `Step` is
+`metis.SecondFactorEnrol`, the account has no app yet; it sets one up by
+signing in to the web app. A program that runs unattended should not sign in
+with a person's password at all: give it an API key with `WithToken`, which is
+never asked for a code.
+
 `WithHTTPClient` replaces the underlying `*http.Client` for custom TLS, proxies,
 or instrumentation. Accounts belonging to more than one organization pick one
 with `client.SetOrganization(orgID)`.
