@@ -8,6 +8,33 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **Moving requests to a changed approval line.** `Approvals.Behind` lists
+  the open requests still on a line's older versions, with who each waits on
+  and the migration preview. `Approvals.Move` moves all of them or the ones
+  chosen to the live version, where a moved step goes to the new line's
+  approvers. A request metis cannot move safely is named in `Left`, with why.
+  An administrator's. Needs a metis server with
+  `GET /api/v1/projects/{id}/approval-lines/{key}/behind`.
+- **`client.Project(id)`.** The calls on one project with its ID given once:
+  `Import`, `Release`, `Start`, `StartOnce`, `StartAndWait`, `SendMessage`,
+  `Broadcast`, `Decide`, `Simulate`, `Versions`, `LiveVersions`, `Promote`,
+  `Schedule`, `CancelSchedule`, `RetryFailed`, `Approvals()`, and `People()`
+  with `List`, `HeldTasks`, `Deactivate`, `Activate` and `Stranded`.
+- **One set of task calls for Users and People.** After `LoginPerson`, or
+  with a person's API key given by the new `WithPersonToken`, `Inbox`,
+  `GetTask`, `ClaimTask`, `UnclaimTask` and `CompleteTask` work as the person.
+- **Approval lines without BPMN.** `c.Approvals(projectID)` defines a line
+  as data (`Define`, `Line`) and runs requests on it: `Submit`, `List`, `Get`,
+  and `Approve`, `Reject`, `Revise`, `Resubmit` and `Withdraw` on a task. An
+  `ApprovalRequest` says each step's state, who it waits on (`Waiting()`) and
+  the whole trail. `UserTask.ApprovalStep()` names the step a task is. Needs a
+  metis server with `POST /api/v1/projects/{id}/approval-lines`.
+- **One inbox.** `Inbox` returns the open tasks the signed-in user holds or
+  may take, without duplicates, oldest first.
+- **Users and groups.** `ListOrganizations`, `ListAccounts`, `ListGroups`,
+  `CreateAccount`, `CreateGroup` and `AddToGroup`, plus `EnsureAccount` and
+  `EnsureGroup`, which create only what is missing, so a seed can run twice.
+
 - **Deactivating and reactivating people.** `SetParticipantActive` stops a
   person of a project signing in and getting work, and settles the tasks they
   hold: handed to one account (`HeldWorkHandOver`), put back on offer
@@ -183,6 +210,16 @@ named another object by ID, it now holds a typed reference. See **Changed**.
 
 ### Changed
 
+- **`examples/approvals` has a line-change scenario.** `run.sh change`
+  gives the supervisor step to Tono, as when Budi leaves, and moves the
+  requests waiting for Budi to him, keeping the rest on their line.
+- **The `…PersonTask` calls are deprecated.** `ListPersonTasks`,
+  `GetPersonTask`, `ClaimPersonTask`, `ReleasePersonTask` and
+  `CompletePersonTask` still work; use `Inbox`, `GetTask`, `ClaimTask`,
+  `UnclaimTask` and `CompleteTask` on a client signed in as the person.
+- **`examples/approvals` uses approval lines.** It no longer ships a BPMN file
+  or a decision table: the line is a Go value, defined at seed time, and the
+  backend is a third shorter.
 - **`StartProcess` and `FetchAndLock` take options** (`...StartOption`,
   `...FetchOption`). Every call compiles as before; only code that stores
   either method in a variable of the old function type needs the new one.

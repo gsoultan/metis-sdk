@@ -30,6 +30,9 @@ type Client struct {
 	// me is who the token signs in, once known: from Login, or read on
 	// first use by CurrentUser. A new token forgets it.
 	me *User
+	// person is set when the token is a person's (from LoginPerson or
+	// WithPersonToken): the task calls then go to the People routes.
+	person bool
 }
 
 // Option configures a Client.
@@ -52,7 +55,22 @@ func WithHTTPClient(h *http.Client) Option {
 // WithToken supplies a token obtained elsewhere, instead of calling Login.
 // Useful when the token comes from a secret store rather than a password.
 func WithToken(token string) Option {
-	return func(c *Client) { c.token = token }
+	return func(c *Client) { c.token = token; c.person = false }
+}
+
+// WithPersonToken uses a person's API key (see [Client.CreatePersonAPIKey]).
+// The task calls, [Client.Inbox], [Client.GetTask], [Client.ClaimTask],
+// [Client.UnclaimTask] and [Client.CompleteTask], then work as that person,
+// as they do after [Client.LoginPerson].
+func WithPersonToken(key string) Option {
+	return func(c *Client) { c.token = key; c.person = true }
+}
+
+// signedInAsPerson says whether the client's token is a person's.
+func (c *Client) signedInAsPerson() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.person
 }
 
 // maxResponseBytes caps how much of one response body is read.
@@ -169,6 +187,7 @@ func (c *Client) Login(ctx context.Context, username, password string) error {
 
 	c.mu.Lock()
 	c.token = out.Token
+	c.person = false
 	c.me = nil
 	if out.User != nil && out.User.Username != "" {
 		c.me = out.User

@@ -74,6 +74,8 @@ func (c *Client) LoginPerson(ctx context.Context, projectID, username, password 
 
 	c.mu.Lock()
 	c.token = out.Token
+	c.person = true
+	c.me = nil
 	c.mu.Unlock()
 	return &PersonSession{Person: *out.Person, ExpiresAt: out.ExpiresAt}, nil
 }
@@ -93,6 +95,9 @@ func (c *Client) CurrentPerson(ctx context.Context) (*Person, error) {
 // ListPersonTasks returns a page of the signed-in person's work: the tasks
 // they hold and the ones they may take. Who they are is the token's, never
 // an argument.
+//
+// Deprecated: use [Client.Inbox], which works as the person once the client
+// signs in with [Client.LoginPerson] or [WithPersonToken].
 func (c *Client) ListPersonTasks(ctx context.Context, page PageOptions) ([]UserTask, *PageInfo, error) {
 	path := "/api/v1/people/tasks"
 	if query := page.query(); len(query) > 0 {
@@ -117,6 +122,9 @@ func (c *Client) ListPersonTasks(ctx context.Context, page PageOptions) ([]UserT
 // GetPersonTask returns one of the signed-in person's tasks. A task that is
 // not theirs to see answers 404 ([IsNotFound]), as one that does not exist
 // does.
+//
+// Deprecated: use [Client.GetTask], which works as the person once the client
+// signs in with [Client.LoginPerson] or [WithPersonToken].
 func (c *Client) GetPersonTask(ctx context.Context, taskID string) (*UserTask, error) {
 	if taskID == "" {
 		return nil, errors.New("metis: GetPersonTask needs a task ID")
@@ -135,12 +143,18 @@ func (c *Client) GetPersonTask(ctx context.Context, taskID string) (*UserTask, e
 
 // ClaimPersonTask takes a task for the signed-in person, so nobody else in
 // the directory works it at the same time.
+//
+// Deprecated: use [Client.ClaimTask], which works as the person once the client
+// signs in with [Client.LoginPerson] or [WithPersonToken].
 func (c *Client) ClaimPersonTask(ctx context.Context, taskID string) error {
 	return c.personTaskAction(ctx, "ClaimPersonTask", taskID, "claim", nil)
 }
 
 // ReleasePersonTask gives a task the signed-in person holds back, for
 // somebody else to take.
+//
+// Deprecated: use [Client.UnclaimTask], which works as the person once the client
+// signs in with [Client.LoginPerson] or [WithPersonToken].
 func (c *Client) ReleasePersonTask(ctx context.Context, taskID string) error {
 	return c.personTaskAction(ctx, "ReleasePersonTask", taskID, "release", nil)
 }
@@ -149,6 +163,9 @@ func (c *Client) ReleasePersonTask(ctx context.Context, taskID string) error {
 // form's variables into the process. As with [Client.CompleteTask], only the
 // variables the step's form declares may be set; anything else is refused
 // with a 400 ([IsInvalid]). Pass nil when the step asks for nothing.
+//
+// Deprecated: use [Client.CompleteTask], which works as the person once the client
+// signs in with [Client.LoginPerson] or [WithPersonToken].
 func (c *Client) CompletePersonTask(ctx context.Context, taskID string, variables Variables) error {
 	return c.personTaskAction(ctx, "CompletePersonTask", taskID, "complete",
 		map[string]any{"variables": variables})

@@ -743,6 +743,9 @@ func (c *Client) ListTasksByAssignee(ctx context.Context, assignee string, page 
 
 // GetTask returns one human task.
 func (c *Client) GetTask(ctx context.Context, taskID string) (*UserTask, error) {
+	if c.signedInAsPerson() {
+		return c.GetPersonTask(ctx, taskID)
+	}
 	var out struct {
 		Task UserTask `json:"task"`
 	}
@@ -761,6 +764,9 @@ func (c *Client) GetTask(ctx context.Context, taskID string) (*UserTask, error) 
 // a particular person, use [Client.AssignTask]; to give one back, use
 // [Client.UnclaimTask].
 func (c *Client) ClaimTask(ctx context.Context, taskID string) error {
+	if c.signedInAsPerson() {
+		return c.ClaimPersonTask(ctx, taskID)
+	}
 	// An empty object rather than no body: the server decodes a JSON body here,
 	// and a missing one is a decode error rather than an empty request.
 	return c.do(ctx, http.MethodPost, "/api/v1/tasks/"+url.PathEscape(taskID)+"/claim",
@@ -776,6 +782,12 @@ func (c *Client) ClaimTask(ctx context.Context, taskID string) error {
 //
 //	err := client.UnclaimTask(ctx, taskID, metis.WithReason("Alice is on leave"))
 func (c *Client) UnclaimTask(ctx context.Context, taskID string, opts ...HandOverOption) error {
+	if c.signedInAsPerson() {
+		if len(opts) > 0 {
+			return errors.New("metis: a person gives back only a task they hold, so UnclaimTask takes no reason for them")
+		}
+		return c.ReleasePersonTask(ctx, taskID)
+	}
 	// An empty object rather than no body, as for ClaimTask: the server reads
 	// the reason from a JSON body here.
 	return c.do(ctx, http.MethodPost, "/api/v1/tasks/"+url.PathEscape(taskID)+"/unclaim",
@@ -935,6 +947,9 @@ func handOverBody(fields map[string]any, opts []HandOverOption) map[string]any {
 // As with [Client.ClaimTask], the acting user is the client's token. Completing
 // a task somebody else holds is refused by the server.
 func (c *Client) CompleteTask(ctx context.Context, taskID string, variables Variables) error {
+	if c.signedInAsPerson() {
+		return c.CompletePersonTask(ctx, taskID, variables)
+	}
 	return c.do(ctx, http.MethodPost, "/api/v1/tasks/"+url.PathEscape(taskID)+"/complete", map[string]any{
 		"variables": variables,
 	}, nil)
