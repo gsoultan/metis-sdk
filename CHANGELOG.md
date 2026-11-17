@@ -25,6 +25,13 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **Signing in where the server asks for a code.** Against a Metis that
+  requires staff to use an authenticator app, `Login` with a correct password
+  answers a `*SecondFactorError` (it matches `ErrSecondFactorRequired`) and
+  keeps no token. `LoginWithCode` takes its `Challenge` and the app's code, or
+  a recovery code, and stores the session. Before, such a server's answer
+  surfaced as "login answered without a token". Needs a metis server with
+  `POST /api/v1/login/code` (gsoultan/metis#261).
 - **Moving requests to a changed approval line.** `Approvals.Behind` lists
   the open requests still on a line's older versions, with who each waits on
   and the migration preview. `Approvals.Move` moves all of them or the ones

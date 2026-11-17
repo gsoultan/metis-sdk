@@ -189,11 +189,14 @@ func IsServerError(err error) bool {
 
 // Login authenticates with a username and password and stores the token on
 // the client for every later call.
+//
+// A server that asks staff for a code from an authenticator app answers a
+// correct password with a [*SecondFactorError] rather than a session; the
+// error matches [ErrSecondFactorRequired]. Pass its Challenge and the code
+// to [Client.LoginWithCode]. Programs that run unattended use an API key
+// instead, with [WithToken], and are never asked for a code.
 func (c *Client) Login(ctx context.Context, username, password string) error {
-	var out struct {
-		Token string `json:"token"`
-		User  *User  `json:"user"`
-	}
+	var out signInAnswer
 	err := c.do(ctx, http.MethodPost, "/api/v1/login", map[string]string{
 		"username": username,
 		"password": password,
@@ -201,19 +204,7 @@ func (c *Client) Login(ctx context.Context, username, password string) error {
 	if err != nil {
 		return err
 	}
-	if out.Token == "" {
-		return errors.New("metis: login answered without a token")
-	}
-
-	c.mu.Lock()
-	c.token = out.Token
-	c.person = false
-	c.me = nil
-	if out.User != nil && out.User.Username != "" {
-		c.me = out.User
-	}
-	c.mu.Unlock()
-	return nil
+	return c.keepSession(out)
 }
 
 // SetOrganization selects which of the caller's organizations later requests
