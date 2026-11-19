@@ -76,3 +76,66 @@ func TestACutPromotionNeedsAName(t *testing.T) {
 		t.Fatal("a promotion with no name was cut")
 	}
 }
+
+func TestAPromotionShowsWhatItPassedWhereItWasCut(t *testing.T) {
+	f, c := newFakeServer(t)
+	ctx := context.Background()
+	f.respond("GET /api/v1/projects/p1/releases/r1", 200,
+		`{"release":{"name":"r1","state":"cut","checked":{"at":"2026-11-17T09:00:00Z","decision_tests":3,"simulation_cases":2}}}`)
+	f.respond("GET /api/v1/projects/p1/releases/r0", 200, `{"release":{"name":"r0","state":"live"}}`)
+
+	got, err := c.GetPromotion(ctx, "p1", "r1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Checked == nil || got.Checked.DecisionTests != 3 || got.Checked.SimulationCases != 2 || got.Checked.At.IsZero() {
+		t.Fatalf("checks read as %+v", got.Checked)
+	}
+
+	older, err := c.GetPromotion(ctx, "p1", "r0")
+	if err != nil {
+		t.Fatalf("get an older promotion: %v", err)
+	}
+	if older.Checked != nil {
+		t.Fatalf("a promotion cut before checks reads checks %+v", older.Checked)
+	}
+}
+
+func TestACutWhoseChecksFailIsRefusedAsInvalid(t *testing.T) {
+	f, c := newFakeServer(t)
+	f.respond("POST /api/v1/projects/p1/releases", 400,
+		`{"error":"release r1 is not cut: 1 check(s) failed: process claims: case \"big claim\" did not end where it should"}`)
+
+	_, err := c.CutPromotion(context.Background(), "p1", CutPromotion{Name: "r1", Processes: []string{"claims"}})
+	if !IsInvalid(err) {
+		t.Fatalf("a refused cut is %v, not invalid", err)
+	}
+}
+
+func TestAStagingLiveNoteIsCarriedToProduction(t *testing.T) {
+	f, c := newFakeServer(t)
+	ctx := context.Background()
+	note := `{"format":"metis.release-live/v1","release":"r1","hash":"abc","live_at":"2026-11-18T09:00:00Z","key":"k","signature":"s"}`
+	f.respond("GET /api/v1/projects/staging/releases/r1/live-note", 200, `{"note":`+note+`}`)
+	f.respond("POST /api/v1/projects/prod/releases/r1/live-note", 200,
+		`{"release":{"name":"r1","state":"staged","live_note":`+note+`}}`)
+
+	got, err := c.LiveNote(ctx, "staging", "r1")
+	if err != nil {
+		t.Fatalf("staging's note: %v", err)
+	}
+	staged, err := c.AttachLiveNote(ctx, "prod", "r1", got)
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	sent, _ := f.last().Body["note"].(map[string]any)
+	if sent["signature"] != "s" || sent["hash"] != "abc" {
+		t.Fatalf("attach sent %v", f.last().Body)
+	}
+	if staged.LiveNote == nil || staged.LiveNote.Key != "k" || staged.LiveNote.LiveAt.IsZero() {
+		t.Fatalf("the promotion reads note %+v", staged.LiveNote)
+	}
+	if _, err := c.AttachLiveNote(ctx, "prod", "r1", []byte("not json")); err == nil {
+		t.Fatal("a note that is not JSON was sent")
+	}
+}
