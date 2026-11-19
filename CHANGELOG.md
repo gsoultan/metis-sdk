@@ -34,6 +34,11 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **Staging's live note.** `LiveNote` reads an environment's signed note that
+  a promotion went live there, and `AttachLiveNote` attaches it to the same
+  promotion staged in production, which can require it before going live.
+  `Promotion.LiveNote` shows an attached note. Needs an engine with
+  [gsoultan/metis#268](https://github.com/gsoultan/metis/pull/268).
 - **Moving requests to a changed approval line.** `Approvals.Behind` lists
   the open requests still on a line's older versions, with who each waits on
   and the migration preview. `Approvals.Move` moves all of them or the ones

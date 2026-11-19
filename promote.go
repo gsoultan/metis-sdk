@@ -42,6 +42,21 @@ type Promotion struct {
 	// Checked is what the promotion passed where it was cut. Nil for one cut
 	// by a server that did not check promotions at the cut.
 	Checked *PromotionChecks `json:"checked,omitempty"`
+	// LiveNote is another environment's signed note that the promotion went
+	// live there, when one was attached here with [Client.AttachLiveNote].
+	LiveNote *PromotionLiveNote `json:"live_note,omitempty"`
+}
+
+// PromotionLiveNote is one environment's signed word that a promotion went
+// live there. A production with a staging before it can require staging's
+// note before the same promotion goes live in production.
+type PromotionLiveNote struct {
+	Format    string    `json:"format"`
+	Release   string    `json:"release"`
+	Hash      string    `json:"hash"`
+	LiveAt    time.Time `json:"live_at"`
+	Key       string    `json:"key"`
+	Signature string    `json:"signature"`
 }
 
 // PromotionChecks is what a promotion passed where it was cut: its
@@ -173,4 +188,30 @@ func (c *Client) ImportPromotionFile(ctx context.Context, projectID string, file
 	}
 	return c.promotion(ctx, http.MethodPost, promotionsPath(projectID)+"/import-file",
 		map[string]any{"file": json.RawMessage(file)})
+}
+
+// LiveNote is the environment the client points at's signed note that a
+// promotion went live there, for the next environment to attach with
+// [Client.AttachLiveNote]. Only a promotion that has gone live has one; the
+// server needs a release signing key.
+func (c *Client) LiveNote(ctx context.Context, projectID, name string) ([]byte, error) {
+	var out struct {
+		Note json.RawMessage `json:"note"`
+	}
+	if err := c.do(ctx, http.MethodGet, promotionsPath(projectID)+"/"+url.PathEscape(name)+"/live-note", nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Note, nil
+}
+
+// AttachLiveNote attaches a note [Client.LiveNote] returned from another
+// environment to a staged promotion. It is refused unless it is for exactly
+// this promotion and signed by a key the target trusts. A production whose
+// server requires one goes live only with it.
+func (c *Client) AttachLiveNote(ctx context.Context, projectID, name string, note []byte) (*Promotion, error) {
+	if !json.Valid(note) {
+		return nil, errors.New("metis: attach live note: the note is not JSON")
+	}
+	return c.promotion(ctx, http.MethodPost, promotionsPath(projectID)+"/"+url.PathEscape(name)+"/live-note",
+		map[string]any{"note": json.RawMessage(note)})
 }

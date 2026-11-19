@@ -111,3 +111,31 @@ func TestACutWhoseChecksFailIsRefusedAsInvalid(t *testing.T) {
 		t.Fatalf("a refused cut is %v, not invalid", err)
 	}
 }
+
+func TestAStagingLiveNoteIsCarriedToProduction(t *testing.T) {
+	f, c := newFakeServer(t)
+	ctx := context.Background()
+	note := `{"format":"metis.release-live/v1","release":"r1","hash":"abc","live_at":"2026-11-18T09:00:00Z","key":"k","signature":"s"}`
+	f.respond("GET /api/v1/projects/staging/releases/r1/live-note", 200, `{"note":`+note+`}`)
+	f.respond("POST /api/v1/projects/prod/releases/r1/live-note", 200,
+		`{"release":{"name":"r1","state":"staged","live_note":`+note+`}}`)
+
+	got, err := c.LiveNote(ctx, "staging", "r1")
+	if err != nil {
+		t.Fatalf("staging's note: %v", err)
+	}
+	staged, err := c.AttachLiveNote(ctx, "prod", "r1", got)
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	sent, _ := f.last().Body["note"].(map[string]any)
+	if sent["signature"] != "s" || sent["hash"] != "abc" {
+		t.Fatalf("attach sent %v", f.last().Body)
+	}
+	if staged.LiveNote == nil || staged.LiveNote.Key != "k" || staged.LiveNote.LiveAt.IsZero() {
+		t.Fatalf("the promotion reads note %+v", staged.LiveNote)
+	}
+	if _, err := c.AttachLiveNote(ctx, "prod", "r1", []byte("not json")); err == nil {
+		t.Fatal("a note that is not JSON was sent")
+	}
+}
