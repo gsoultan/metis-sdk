@@ -26,6 +26,11 @@ while the major version is 0 the API may still move.
 
 ### Documentation
 
+- **A start that misses a required input is refused.** A start step can now
+  declare the variables a run must be started with. `StartProcess`, and a
+  message or signal that starts a process, answer 400 (`IsInvalid`) naming each
+  input that is missing or of the wrong kind, and start nothing. Nothing in the
+  SDK's calls changes; the doc comment and the README say what to expect.
 - **Where to point the client.** The README says which of the engine
   ([gsoultan/metis](https://github.com/gsoultan/metis)) and the web app in
   front of it ([gsoultan/metis-server](https://github.com/gsoultan/metis-server))

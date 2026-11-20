@@ -944,6 +944,21 @@ if err == nil && status.NextRunAt != nil {
 _, err = client.PauseStartSchedule(ctx, projectID, "nightly-report") // over a maintenance window
 ```
 
+A start step can also declare inputs, the variables a run must be started
+with. A start that leaves out a required one is refused and starts nothing,
+and the error says which:
+
+```go
+_, err := client.StartProcess(ctx, projectID, "expense-claim", metis.Variables{"currency": "USD"})
+if metis.IsInvalid(err) {
+	// metis: server returned 400: expense-claim cannot be started:
+	// amount is required; currency must be one of GBP, EUR
+}
+```
+
+An input left out takes its default where it has one, which is what a
+scheduled run starts with.
+
 `ReleaseVersion` is a release with a guard in front. It checks that the
 diagram holds the process, runs every saved simulation case on it as a draft,
 and deploys only if they all pass; otherwise `ErrReleaseBlocked` comes back

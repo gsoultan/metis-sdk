@@ -142,3 +142,25 @@ func TestAWorkerSaysWhatItIs(t *testing.T) {
 		t.Errorf("version = %q, want the one given", got)
 	}
 }
+
+// A start step can declare inputs, and the server refuses a start that misses
+// a required one. The caller has to be able to tell that from a server fault,
+// and to read which input it was.
+func TestStartProcessSaysWhichInputARefusedStartIsMissing(t *testing.T) {
+	f, client := newFakeServer(t)
+	f.respond("POST /api/v1/process/start", 400,
+		`{"error":"expense-claim cannot be started: amount is required; currency must be one of GBP, EUR"}`)
+
+	id, err := client.StartProcess(t.Context(), "p-1", "expense-claim", Variables{"currency": "USD"})
+	if id != "" {
+		t.Errorf("a refused start returned the instance %q", id)
+	}
+	if !IsInvalid(err) {
+		t.Fatalf("a start refused for its inputs: got %v; want IsInvalid", err)
+	}
+	for _, want := range []string{"amount is required", "currency must be one of GBP, EUR"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not say %q: %v", want, err)
+		}
+	}
+}
