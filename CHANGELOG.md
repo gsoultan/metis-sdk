@@ -6,6 +6,13 @@ while the major version is 0 the API may still move.
 
 ## [Unreleased]
 
+### Upgrading
+
+- **`SendMessage` with an empty correlation key only starts processes.** The
+  engine no longer delivers such a message to waiting instances, and refuses
+  it when no message start event listens for the name. Pass the instance's
+  correlation key to move it on. `SendMessage`'s documentation says so.
+
 ### Fixed
 
 - **A base address ending in `/api/v1` works.** `NewClient("https://bpm.example.com/api/v1")`
