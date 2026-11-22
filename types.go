@@ -96,12 +96,16 @@ type NodeType string
 
 // The element kinds the engine recognises.
 const (
-	NodeStartEvent             NodeType = "startEvent"
-	NodeEndEvent               NodeType = "endEvent"
-	NodeErrorEndEvent          NodeType = "errorEndEvent"
-	NodeTerminateEndEvent      NodeType = "terminateEndEvent"
-	NodeUserTask               NodeType = "userTask"
-	NodeServiceTask            NodeType = "serviceTask"
+	NodeStartEvent        NodeType = "startEvent"
+	NodeEndEvent          NodeType = "endEvent"
+	NodeErrorEndEvent     NodeType = "errorEndEvent"
+	NodeTerminateEndEvent NodeType = "terminateEndEvent"
+	NodeUserTask          NodeType = "userTask"
+	NodeServiceTask       NodeType = "serviceTask"
+	// NodeScriptTask runs JavaScript on the engine. The engine refuses a
+	// definition with a script task that carries a script unless the server
+	// sets METIS_FEATURE_SCRIPT_TASKS=true, because no setting bounds a
+	// script's memory.
 	NodeScriptTask             NodeType = "scriptTask"
 	NodeManualTask             NodeType = "manualTask"
 	NodeBusinessRuleTask       NodeType = "businessRuleTask"

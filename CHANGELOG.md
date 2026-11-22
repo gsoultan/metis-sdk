@@ -6,6 +6,14 @@ while the major version is 0 the API may still move.
 
 ## [Unreleased]
 
+### Upgrading
+
+- **Script tasks need the engine to opt in.** From the engine release that
+  switches them off, deploying a definition with a script task that carries a
+  script fails unless the server sets `METIS_FEATURE_SCRIPT_TASKS=true`, and
+  `NodeScriptTask` says so. Rewrite such steps as FEEL mappings or a service
+  task, or ask the operator to turn the flag on.
+
 ### Fixed
 
 - **A base address ending in `/api/v1` works.** `NewClient("https://bpm.example.com/api/v1")`
