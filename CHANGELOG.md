@@ -6,6 +6,14 @@ while the major version is 0 the API may still move.
 
 ## [Unreleased]
 
+### Added
+
+- **People under your own user ids.** `Participant.ExternalID`;
+  `ImportPeople` and `CheckPeopleImport` with a `PeopleSource` (an endpoint or
+  a database query, a field `Mapping`, and `MoveOpenTasks` for renames), and
+  `FindParticipantByExternalID`. On a project: `People().Import`,
+  `People().CheckImport` and `People().ByExternalID`.
+
 ### Fixed
 
 - **A base address ending in `/api/v1` works.** `NewClient("https://bpm.example.com/api/v1")`

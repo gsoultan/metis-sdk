@@ -55,8 +55,11 @@ type ActivationResult struct {
 // Participant is a person in a project's People: who its processes can give
 // work to, separate from the accounts that administer metis.
 type Participant struct {
-	ID          string `json:"id"`
-	Username    string `json:"username"`
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	// ExternalID is the person's id in your own application, when the
+	// directory was imported with one. Unique within the project.
+	ExternalID  string `json:"external_id,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
 	Email       string `json:"email,omitempty"`
 	// Active is false for somebody deactivated: they cannot sign in and get

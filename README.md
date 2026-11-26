@@ -654,6 +654,31 @@ err = client.CompleteByTaskLink(ctx, token, metis.Variables{"approved": true})
 
 People need a server newer than Metis v0.5.0 with `METIS_PEOPLE_TOKEN_KEY` set.
 
+**Bringing your people in** under your own user ids. Give each person your
+application's id as their external ID, and Metis recognises them by it from then
+on: somebody renamed in your application is renamed in Metis, not added twice.
+Check first, and nothing is written:
+
+```go
+people := client.Project(projectID).People()
+src := metis.PeopleSource{
+	Kind:    "http",
+	URL:     "https://app.example.com/api/users",
+	Headers: map[string]string{"Authorization": "Bearer " + appToken},
+	Mapping: map[string]string{"external_id": "id", "username": "login", "display_name": "profile.full_name"},
+}
+check, err := people.CheckImport(ctx, src)          // check.Counts[metis.ImportRenamed], check.Rows…
+src.MoveOpenTasks = true                             // a rename takes the person's open tasks along
+done, err := people.Import(ctx, src)
+
+ada, found, err := people.ByExternalID(ctx, "u-7")  // ada.Username is who to assign work to
+```
+
+External IDs and usernames are unique within a project: another project, or
+another organization, may have its own `u-7`, and that is somebody else. A
+`postgres` source needs the Query author role. These need a server with
+`POST /api/v1/participants/import/check`; an older one answers `IsNotFound`.
+
 ## External-task workers
 
 A `Worker` is how your own service performs a step of someone else's process:

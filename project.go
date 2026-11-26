@@ -130,6 +130,23 @@ func (pp ProjectPeople) List(ctx context.Context) ([]Participant, error) {
 	return pp.c.ListParticipants(ctx, pp.project)
 }
 
+// Import reads people from src. See [Client.ImportPeople].
+func (pp ProjectPeople) Import(ctx context.Context, src PeopleSource) (PeopleImport, error) {
+	return pp.c.ImportPeople(ctx, pp.project, src)
+}
+
+// CheckImport says what Import would do, writing nothing. See
+// [Client.CheckPeopleImport].
+func (pp ProjectPeople) CheckImport(ctx context.Context, src PeopleSource) (PeopleImportCheck, error) {
+	return pp.c.CheckPeopleImport(ctx, pp.project, src)
+}
+
+// ByExternalID finds the person with your application's id for them. See
+// [Client.FindParticipantByExternalID].
+func (pp ProjectPeople) ByExternalID(ctx context.Context, externalID string) (Participant, bool, error) {
+	return pp.c.FindParticipantByExternalID(ctx, pp.project, externalID)
+}
+
 // HeldTasks is the open tasks a person holds.
 func (pp ProjectPeople) HeldTasks(ctx context.Context, participantID string) ([]HeldTask, error) {
 	return pp.c.ListHeldTasks(ctx, pp.project, participantID)
