@@ -17,6 +17,15 @@ while the major version is 0 the API may still move.
   `StartSchedule`, `PauseStartSchedule` and `ResumeStartSchedule`. Needs a
   metis server with `GET /api/v1/definitions/start-schedule`.
 
+### Changed
+
+- **A promotion is checked where it is cut.** `CutPromotion` is refused, as
+  `IsInvalid`, when a carried decision fails its own tests or a carried
+  process fails a saved simulation case on the server it is cut on. What
+  passed is on `Promotion.Checked` (`At`, `DecisionTests`, `SimulationCases`).
+  It is nil for a promotion cut by an engine before
+  [gsoultan/metis#266](https://github.com/gsoultan/metis/pull/266).
+
 ### Fixed
 
 - **A base address ending in `/api/v1` works.** `NewClient("https://bpm.example.com/api/v1")`
@@ -41,6 +50,11 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **Staging's live note.** `LiveNote` reads an environment's signed note that
+  a promotion went live there, and `AttachLiveNote` attaches it to the same
+  promotion staged in production, which can require it before going live.
+  `Promotion.LiveNote` shows an attached note. Needs an engine with
+  [gsoultan/metis#268](https://github.com/gsoultan/metis/pull/268).
 - **Signing in where the server asks for a code.** Against a Metis that
   requires staff to use an authenticator app, `Login` with a correct password
   answers a `*SecondFactorError` (it matches `ErrSecondFactorRequired`) and
