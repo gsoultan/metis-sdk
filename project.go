@@ -148,6 +148,13 @@ func (pp ProjectPeople) List(ctx context.Context) ([]Participant, error) {
 	return pp.c.ListParticipants(ctx, pp.project)
 }
 
+// Page is one page of the directory. See [Client.ListParticipantsPage];
+// opts.ProjectID is this project whatever it holds.
+func (pp ProjectPeople) Page(ctx context.Context, opts ListParticipantsOptions) ([]Participant, *PageInfo, error) {
+	opts.ProjectID = pp.project
+	return pp.c.ListParticipantsPage(ctx, opts)
+}
+
 // HeldTasks is the open tasks a person holds.
 func (pp ProjectPeople) HeldTasks(ctx context.Context, participantID string) ([]HeldTask, error) {
 	return pp.c.ListHeldTasks(ctx, pp.project, participantID)

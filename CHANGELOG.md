@@ -8,6 +8,13 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **People a page at a time.** `ListParticipantsPage` returns one page of a
+  project's People, alphabetically by username, with a `PageInfo` saying how
+  many there are in all, and searches usernames, display names and emails on
+  the server. Also on `client.Project(id).People()` as `Page`. Needs a metis
+  server that pages `GET /api/v1/participants`; an older one answers everybody
+  and a nil `PageInfo`.
+
 - **A process's scheduled starts.** `GetStartSchedule` says whether a process
   starts on a schedule, when its next run is due, whether the schedule is
   paused, and the last failure if a scheduled start is failing.
