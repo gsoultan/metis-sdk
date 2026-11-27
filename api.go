@@ -549,9 +549,11 @@ func (c *Client) ResolveIncident(ctx context.Context, incidentID string) error {
 
 // SendMessage correlates a message into whatever instance is waiting on it.
 //
-// correlationKey selects which instance when several wait on the same message
-// name. Pass "" only when the message name alone is unambiguous — an empty
-// key matches every waiting subscription for that name.
+// correlationKey selects the waiting instance. With "" the message reaches no
+// waiting instance: it only starts the processes whose message start event
+// listens for messageName, and the engine refuses it as an invalid argument
+// when none does. Engines before that change delivered an empty key to every
+// instance waiting on the name.
 func (c *Client) SendMessage(ctx context.Context, projectID, messageName, correlationKey string, variables Variables) error {
 	return c.do(ctx, http.MethodPost, "/api/v1/processes/message", map[string]any{
 		"project_id":      projectID,
