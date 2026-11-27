@@ -8,6 +8,12 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **Grule rules import.** `ImportGruleRules` turns Grule rule files (`.grl` or
+  Grule's JSON rules) into decision tables in a project, and with
+  `GruleDeploy()` deploys a process that runs them. `GrulePreview()` reports on
+  every rule and stores nothing; `Skipped()` lists the rules left out, with the
+  reason. Needs an engine with `POST /api/v1/decisions/import/grule`.
+
 - **A process's scheduled starts.** `GetStartSchedule` says whether a process
   starts on a schedule, when its next run is due, whether the schedule is
   paused, and the last failure if a scheduled start is failing.

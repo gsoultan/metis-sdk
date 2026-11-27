@@ -945,6 +945,21 @@ result, err := client.EvaluateDecision(ctx, projectID, "credit-limit", metis.Var
 limit, _ := result.Values.Int("limit") // result.MatchedRuleIDs says which lines decided
 ```
 
+Rules written for [Grule](https://github.com/hyperjumptech/grule-rule-engine)
+come in as decision tables, and with `GruleDeploy()` a process that runs them
+in Grule's firing order. Preview first: the report says, for every rule, which
+table it became a line of or why it was left out.
+
+```go
+files := []metis.RuleFile{{Name: "pricing.grl", Content: grl}}
+report, err := client.ImportGruleRules(ctx, projectID, "pricing", files, metis.GrulePreview())
+for _, rule := range report.Skipped() {
+	log.Printf("%s (%s): %s", rule.Name, rule.Position, rule.Reason)
+}
+report, err = client.ImportGruleRules(ctx, projectID, "pricing", files, metis.GruleDeploy())
+// report.ProcessID is the process; report.Results names the variable each field is written to
+```
+
 `ImportDefinition` makes the version it deploys the one new instances start
 on. `ListVersions` shows which is live and how much each still runs;
 `PromoteVersion` makes another one live now (to roll back, say),
