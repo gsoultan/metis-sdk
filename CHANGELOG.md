@@ -8,6 +8,11 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **People under your own user ids.** `Participant.ExternalID`;
+  `ImportPeople` and `CheckPeopleImport` with a `PeopleSource` (an endpoint or
+  a database query, a field `Mapping`, and `MoveOpenTasks` for renames), and
+  `FindParticipantByExternalID`. On a project: `People().Import`,
+  `People().CheckImport` and `People().ByExternalID`.
 - **A process's scheduled starts.** `GetStartSchedule` says whether a process
   starts on a schedule, when its next run is due, whether the schedule is
   paused, and the last failure if a scheduled start is failing.
