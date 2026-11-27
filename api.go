@@ -172,6 +172,20 @@ func (c *Client) ListUserTaskNodes(ctx context.Context, definitionID string) ([]
 //
 // A business key needs a server newer than **Metis v0.5.0**. An older one
 // ignores it and starts the instance without one.
+//
+// A process's start step may declare inputs: the variables a run must be
+// started with. A start that leaves out a required one, or gives one the wrong
+// kind of value, is refused with a 400 ([IsInvalid]) whose message names each
+// input, and starts nothing:
+//
+//	_, err := client.StartProcess(ctx, projectID, "expense-claim", metis.Variables{"currency": "USD"})
+//	// metis: server returned 400: expense-claim cannot be started:
+//	// amount is required; currency must be one of GBP, EUR
+//
+// An input left out takes its default where it has one, and variables the
+// step does not declare are accepted as before. The same holds for a run
+// started by [Client.SendMessage] or a signal. A server older than the one
+// that checks inputs starts the run with whatever it is given.
 func (c *Client) StartProcess(ctx context.Context, projectID, definitionKey string, variables Variables, opts ...StartOption) (string, error) {
 	body := map[string]any{
 		"project_id":     projectID,

@@ -13,6 +13,17 @@ while the major version is 0 the API may still move.
   it when no message start event listens for the name. Pass the instance's
   correlation key to move it on. `SendMessage`'s documentation says so.
 
+### Added
+
+- **A process's scheduled starts.** `GetStartSchedule` says whether a process
+  starts on a schedule, when its next run is due, whether the schedule is
+  paused, and the last failure if a scheduled start is failing.
+  `PauseStartSchedule` stops the scheduled starts and `ResumeStartSchedule`
+  lets them carry on from the next scheduled time; nothing is started for the
+  times that passed while paused. Also on `client.Project(id)` as
+  `StartSchedule`, `PauseStartSchedule` and `ResumeStartSchedule`. Needs a
+  metis server with `GET /api/v1/definitions/start-schedule`.
+
 ### Fixed
 
 - **A base address ending in `/api/v1` works.** `NewClient("https://bpm.example.com/api/v1")`
@@ -22,6 +33,11 @@ while the major version is 0 the API may still move.
 
 ### Documentation
 
+- **A start that misses a required input is refused.** A start step can now
+  declare the variables a run must be started with. `StartProcess`, and a
+  message or signal that starts a process, answer 400 (`IsInvalid`) naming each
+  input that is missing or of the wrong kind, and start nothing. Nothing in the
+  SDK's calls changes; the doc comment and the README say what to expect.
 - **Where to point the client.** The README says which of the engine
   ([gsoultan/metis](https://github.com/gsoultan/metis)) and the web app in
   front of it ([gsoultan/metis-server](https://github.com/gsoultan/metis-server))
@@ -32,6 +48,13 @@ while the major version is 0 the API may still move.
 
 ### Added
 
+- **Signing in where the server asks for a code.** Against a Metis that
+  requires staff to use an authenticator app, `Login` with a correct password
+  answers a `*SecondFactorError` (it matches `ErrSecondFactorRequired`) and
+  keeps no token. `LoginWithCode` takes its `Challenge` and the app's code, or
+  a recovery code, and stores the session. Before, such a server's answer
+  surfaced as "login answered without a token". Needs a metis server with
+  `POST /api/v1/login/code` (gsoultan/metis#261).
 - **Moving requests to a changed approval line.** `Approvals.Behind` lists
   the open requests still on a line's older versions, with who each waits on
   and the migration preview. `Approvals.Move` moves all of them or the ones

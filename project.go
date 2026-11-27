@@ -114,6 +114,24 @@ func (p ProjectCalls) CancelSchedule(ctx context.Context, releaseID string) erro
 	return p.c.CancelScheduledVersion(ctx, p.id, releaseID)
 }
 
+// StartSchedule says when the process next starts by itself and whether its
+// schedule is paused. See [Client.GetStartSchedule].
+func (p ProjectCalls) StartSchedule(ctx context.Context, processKey string) (*StartScheduleStatus, error) {
+	return p.c.GetStartSchedule(ctx, p.id, processKey)
+}
+
+// PauseStartSchedule stops the process starting on its schedule. See
+// [Client.PauseStartSchedule].
+func (p ProjectCalls) PauseStartSchedule(ctx context.Context, processKey string) (*StartScheduleStatus, error) {
+	return p.c.PauseStartSchedule(ctx, p.id, processKey)
+}
+
+// ResumeStartSchedule lets the process start on its schedule again. See
+// [Client.ResumeStartSchedule].
+func (p ProjectCalls) ResumeStartSchedule(ctx context.Context, processKey string) (*StartScheduleStatus, error) {
+	return p.c.ResumeStartSchedule(ctx, p.id, processKey)
+}
+
 // RetryFailed retries the project's failed work. See [Client.RetryFailed].
 func (p ProjectCalls) RetryFailed(ctx context.Context, opts RetryFailedOptions) (*BatchPreview, error) {
 	return p.c.RetryFailed(ctx, p.id, opts)
